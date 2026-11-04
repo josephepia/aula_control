@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('studentAPI', {
   toggleHand: () => ipcRenderer.invoke('toggle-hand'),
   sendChat: (message) => ipcRenderer.invoke('send-chat', message),
   startMaestroServer: () => ipcRenderer.invoke('start-maestro-server'),
+  stopMaestroServer: () => ipcRenderer.invoke('stop-maestro-server'),
 
   // Radar UDP y Auto-Descubrimiento
   restartRadarSearch: () => ipcRenderer.invoke('restart-radar-search'),

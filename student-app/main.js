@@ -7,11 +7,15 @@ const http = require('http');
 const { exec } = require('child_process');
 const io = require('socket.io-client');
 
+// Identificador único de instancia para evitar auto-bucles de conexión
+const appInstanceId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+
 let mainWindow = null;
 let socket = null;
 let screenInterval = null;
 let currentStudentName = '';
 let isCapturing = false;
+let isMaestroMode = false; // AISLAMIENTO DE ROLES: Modo Maestro activo
 
 // Radar UDP & Scanner State
 const RADAR_PORT = 41234;
@@ -21,7 +25,6 @@ let autoConnectActive = true;
 let fallbackScanTimer = null;
 let forceConnectHttpServer = null;
 
-// Servidor local embebido si se activa modo Maestro
 let embeddedServerStarted = false;
 
 function getLocalIPv4Address() {
@@ -36,7 +39,7 @@ function getLocalIPv4Address() {
   return '127.0.0.1';
 }
 
-// --- Servidor HTTP Ligero en Puerto 3001 para "Forzar Conexión / Enlazar" desde el Maestro ---
+// Servidor HTTP en puerto 3001 para enlace forzado desde el Maestro
 function setupForceConnectListener() {
   try {
     forceConnectHttpServer = http.createServer((req, res) => {
@@ -62,7 +65,7 @@ function setupForceConnectListener() {
             maestroUrl = urlObj.searchParams.get('maestroUrl');
           }
 
-          if (maestroUrl) {
+          if (maestroUrl && !isMaestroMode) {
             console.log(`[Force Connect] Petición recibida del Maestro para conectar a: ${maestroUrl}`);
             notifyMaestroDiscovered(maestroUrl.replace(/^https?:\/\//, '').split(':')[0], 3000, 'Maestro-PC', 'FORCE_LINK');
             res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -70,7 +73,7 @@ function setupForceConnectListener() {
           }
 
           res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: 'maestroUrl requerido' }));
+          res.end(JSON.stringify({ success: false, error: 'Acción no permitida o maestroUrl invalido' }));
         });
       } else {
         res.writeHead(404);
@@ -79,14 +82,14 @@ function setupForceConnectListener() {
     });
 
     forceConnectHttpServer.listen(3001, () => {
-      console.log('[Force Connect Listener] Escuchando solicitudes de enlace en puerto 3001');
+      console.log('[Force Connect Listener] Escuchando en puerto 3001');
     });
   } catch (err) {
     console.warn('[Force Connect Listener Error]:', err.message);
   }
 }
 
-// --- 1. RECEPCIÓN DE RADAR UDP MAESTRO ---
+// --- RECEPCIÓN DE RADAR UDP MAESTRO ---
 function setupRadarListener() {
   try {
     udpSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
@@ -99,6 +102,11 @@ function setupRadarListener() {
       try {
         const data = JSON.parse(msg.toString());
         if (data && data.service === 'AULA_CONTROL_MASTER') {
+          // FILTRADO DE AUTO-IDENTIFICACIÓN: Ignorar si es la propia instancia o si la app está en Modo Maestro
+          if (data.instanceId === appInstanceId || isMaestroMode) {
+            return;
+          }
+
           const maestroIp = rinfo.address;
           const maestroPort = data.port || 3000;
 
@@ -112,25 +120,24 @@ function setupRadarListener() {
 
     udpSocket.bind(RADAR_PORT, () => {
       udpSocket.setBroadcast(true);
-      console.log(`[Radar UDP Student] Escuchando en puerto UDP ${RADAR_PORT}`);
+      console.log(`[Radar UDP Student] Escuchando en puerto UDP ${RADAR_PORT} (Instance ID: ${appInstanceId})`);
     });
 
   } catch (err) {
     console.warn('[Radar Setup Error]:', err.message);
   }
 
-  // 2. Programar Fallback de Escaneo en Subred Local si no hay respuesta en 5 segundos
   fallbackScanTimer = setTimeout(() => {
-    if (!maestroDiscovered) {
+    if (!maestroDiscovered && !isMaestroMode) {
       console.log('[Radar Fallback] Sin respuesta UDP Multicast en 5s. Iniciando escaneo de subred local HTTP...');
       runSubnetScanFallback();
     }
   }, 5000);
 }
 
-// --- 3. FALLBACK: ESCANEO DE SUBRED LOCAL HTTP (/api/identity) ---
+// --- FALLBACK: ESCANEO DE SUBRED LOCAL HTTP (/api/identity) ---
 function runSubnetScanFallback() {
-  if (maestroDiscovered) return;
+  if (maestroDiscovered || isMaestroMode) return;
 
   const interfaces = os.networkInterfaces();
   const subnetsToScan = [];
@@ -153,7 +160,7 @@ function runSubnetScanFallback() {
 
   subnetsToScan.forEach(subnet => {
     for (let i = 1; i <= 254; i++) {
-      if (maestroDiscovered) break;
+      if (maestroDiscovered || isMaestroMode) break;
       const targetIp = `${subnet}.${i}`;
       checkMaestroIdentityHttp(targetIp, 3000);
     }
@@ -161,7 +168,7 @@ function runSubnetScanFallback() {
 }
 
 function checkMaestroIdentityHttp(targetIp, port = 3000) {
-  if (maestroDiscovered) return;
+  if (maestroDiscovered || isMaestroMode) return;
 
   const options = {
     hostname: targetIp,
@@ -177,7 +184,9 @@ function checkMaestroIdentityHttp(targetIp, port = 3000) {
     res.on('end', () => {
       try {
         const data = JSON.parse(body);
-        if (data && data.service === 'AULA_CONTROL_MASTER' && !maestroDiscovered) {
+        if (data && data.service === 'AULA_CONTROL_MASTER' && !maestroDiscovered && !isMaestroMode) {
+          if (data.instanceId === appInstanceId) return; // Ignorar si es uno mismo
+
           maestroDiscovered = true;
           console.log(`[Subnet Scan Éxito] Maestro hallado en ${targetIp}:${port}`);
           notifyMaestroDiscovered(targetIp, port, data.name || 'Maestro-PC', 'SUBNET_SCAN');
@@ -192,6 +201,7 @@ function checkMaestroIdentityHttp(targetIp, port = 3000) {
 }
 
 function notifyMaestroDiscovered(ip, port, name, method) {
+  if (isMaestroMode) return; // Jamás conectar si se está actuando como Maestro
   const url = `http://${ip}:${port}`;
 
   if (mainWindow) {
@@ -295,7 +305,7 @@ function unblockDNS() {
 }
 
 async function captureAndSendScreen() {
-  if (isCapturing) return;
+  if (isCapturing || isMaestroMode) return;
   isCapturing = true;
 
   try {
@@ -318,6 +328,7 @@ async function captureAndSendScreen() {
 
 function startScreenSharing(intervalMs = 2000) {
   if (screenInterval) clearInterval(screenInterval);
+  if (isMaestroMode) return;
   captureAndSendScreen();
   screenInterval = setInterval(captureAndSendScreen, intervalMs);
   if (mainWindow) mainWindow.webContents.send('screen-sharing-status', true);
@@ -332,7 +343,7 @@ function stopScreenSharing() {
 }
 
 function sendStudentRegistration() {
-  if (socket && socket.connected) {
+  if (socket && socket.connected && !isMaestroMode) {
     const localIp = getLocalIPv4Address();
     const payload = {
       hostname: currentStudentName || os.hostname() || 'Estudiante-PC',
@@ -345,6 +356,11 @@ function sendStudentRegistration() {
 }
 
 function connectToMaestroSocket(serverUrl) {
+  if (isMaestroMode) {
+    console.log('[AISLAMIENTO] En Modo Maestro no se permite conectar como cliente Socket.io.');
+    return;
+  }
+
   if (socket) {
     socket.disconnect();
   }
@@ -356,7 +372,7 @@ function connectToMaestroSocket(serverUrl) {
   });
 
   socket.on('connect', () => {
-    console.log('[Socket] Conectado exitosamente al servidor maestro:', serverUrl);
+    console.log('[Socket Estudiante] Conectado al servidor maestro:', serverUrl);
     sendStudentRegistration();
     startScreenSharing(2000);
     if (mainWindow) {
@@ -558,21 +574,52 @@ app.on('window-all-closed', () => {
 
 // IPC Handlers
 ipcMain.handle('start-maestro-server', async () => {
+  // AISLAMIENTO DE ROLES: Activar Modo Maestro
+  isMaestroMode = true;
+
+  // Desconectar cliente Socket.io del estudiante de forma segura
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
+  stopScreenSharing();
+
   if (!embeddedServerStarted) {
     try {
       const serverModule = require('../server/index.js');
-      await serverModule.startEmbeddedServer(3000);
+      await serverModule.startEmbeddedServer(3000, appInstanceId);
       embeddedServerStarted = true;
       return { success: true, url: 'http://localhost:3000' };
     } catch (err) {
       if (err.code === 'EADDRINUSE') {
         embeddedServerStarted = true;
-        return { success: true, url: 'http://localhost:3000', note: 'Servidor ya activo en puerto 3000' };
+        return { success: true, url: 'http://localhost:3000', note: 'Servidor activo' };
       }
       return { success: false, error: err.message };
     }
   }
   return { success: true, url: 'http://localhost:3000' };
+});
+
+ipcMain.handle('stop-maestro-server', async () => {
+  // AISLAMIENTO DE ROLES: Salir del Modo Maestro
+  isMaestroMode = false;
+  maestroDiscovered = false;
+
+  try {
+    const serverModule = require('../server/index.js');
+    if (serverModule.stopEmbeddedServer) {
+      serverModule.stopEmbeddedServer();
+    }
+  } catch (e) {}
+
+  embeddedServerStarted = false;
+
+  // Reactivar escaneo Radar para Modo Estudiante
+  if (fallbackScanTimer) clearTimeout(fallbackScanTimer);
+  runSubnetScanFallback();
+
+  return { success: true };
 });
 
 ipcMain.handle('get-desktop-source-id', async () => {
@@ -586,6 +633,7 @@ ipcMain.handle('get-desktop-source-id', async () => {
 });
 
 ipcMain.handle('connect-server', (event, { serverUrl, hostname }) => {
+  if (isMaestroMode) return { success: false, error: 'En Modo Maestro no se conecta como cliente.' };
   const defaultName = os.hostname() || 'Estudiante-PC';
   currentStudentName = hostname && hostname.trim() ? hostname.trim() : defaultName;
   connectToMaestroSocket(serverUrl);
@@ -602,6 +650,7 @@ ipcMain.handle('disconnect-server', () => {
 });
 
 ipcMain.handle('restart-radar-search', () => {
+  if (isMaestroMode) return { success: false };
   maestroDiscovered = false;
   if (fallbackScanTimer) clearTimeout(fallbackScanTimer);
   runSubnetScanFallback();

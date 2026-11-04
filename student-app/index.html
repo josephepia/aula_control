@@ -85,15 +85,17 @@
 </head>
 <body>
 
+  <!-- App Header -->
   <header>
     <h1>🎒 Aula Control — App Unificada</h1>
     <div class="header-actions">
       <span id="conn-badge" class="status-badge searching">🟡 Radar Activo</span>
       <button id="admin-login-btn" class="btn btn-warning btn-sm" onclick="openLoginModal()">🔑 Acceso Profesor / Administrador</button>
-      <button id="admin-logout-btn" class="btn btn-danger btn-sm" style="display:none;" onclick="logoutMaestro()">🔒 Cerrar Sesión Maestro</button>
+      <button id="admin-logout-btn" class="btn btn-danger btn-sm" style="display:none;" onclick="logoutMaestro()">🔒 Cerrar Sesión Maestro / Desconectar</button>
     </div>
   </header>
 
+  <!-- Nav Tabs para el Maestro -->
   <div class="maestro-nav-bar" id="maestro-nav-bar">
     <button class="nav-tab-btn active" onclick="switchMaestroTab('tab-dashboard')">🖥️ Panel Maestro</button>
     <button class="nav-tab-btn" onclick="switchMaestroTab('tab-fs')">📁 Explorador de Archivos Remoto</button>
@@ -265,8 +267,9 @@
         document.getElementById('student-name').value = defaultName;
       }
 
-      // Auto-Descubrimiento UDP o Subred
       window.studentAPI.onMaestroAutoDiscovered((data) => {
+        if (isMaestroLogged) return; // Ignorar en modo maestro
+
         console.log('[Radar Auto-Discovered]:', data);
         const serverInput = document.getElementById('server-url');
         serverInput.value = data.url || `http://${data.ip}:${data.port}`;
@@ -295,6 +298,7 @@
     });
 
     async function connectToServer() {
+      if (isMaestroLogged) return;
       const serverUrl = document.getElementById('server-url').value.trim();
       const hostname = document.getElementById('student-name').value.trim();
 
@@ -372,25 +376,42 @@
         isMaestroLogged = true;
         closeLoginModal();
 
+        // Iniciar Servidor Embebido y Aislamiento de Roles
         await window.studentAPI.startMaestroServer();
 
         document.getElementById('admin-login-btn').style.display = 'none';
         document.getElementById('admin-logout-btn').style.display = 'inline-flex';
+        document.getElementById('student-section').style.display = 'none';
         document.getElementById('maestro-nav-bar').classList.add('active');
         document.getElementById('maestro-section').style.display = 'flex';
 
-        connectToServer();
+        const badge = document.getElementById('conn-badge');
+        badge.innerText = '🎓 MODO MAESTRO';
+        badge.className = 'status-badge connected';
       } else {
         document.getElementById('login-error').style.display = 'block';
       }
     }
 
-    function logoutMaestro() {
+    async function logoutMaestro() {
       isMaestroLogged = false;
+
+      // Detener Servidor y Broadcast Maestro
+      if (window.studentAPI && window.studentAPI.stopMaestroServer) {
+        await window.studentAPI.stopMaestroServer();
+      }
+
       document.getElementById('admin-login-btn').style.display = 'inline-flex';
       document.getElementById('admin-logout-btn').style.display = 'none';
       document.getElementById('maestro-nav-bar').classList.remove('active');
       document.getElementById('maestro-section').style.display = 'none';
+      document.getElementById('student-section').style.display = 'flex';
+
+      const badge = document.getElementById('conn-badge');
+      badge.innerText = '🟡 Radar Activo';
+      badge.className = 'status-badge searching';
+
+      triggerRadarReScan();
     }
 
     function switchMaestroTab(tabId) {
@@ -404,6 +425,7 @@
     // WebRTC
     function setupStudentWebRTCListeners() {
       window.studentAPI.onWebRTCOfferReceived(async (data) => {
+        if (isMaestroLogged) return;
         const { senderSocketId, offer } = data;
         const sourceId = await window.studentAPI.getDesktopSourceId();
 
@@ -591,8 +613,9 @@
       }
     }
 
-    // Status listeners
+    // Status Listeners
     window.studentAPI.onConnectionStatus((data) => {
+      if (isMaestroLogged) return;
       const badge = document.getElementById('conn-badge');
       const connBtn = document.getElementById('connect-btn');
       const disconnBtn = document.getElementById('disconnect-btn');
@@ -648,7 +671,7 @@
       const select = document.getElementById('fs-student-select');
 
       if (list.length === 0) {
-        grid.innerHTML = '<div style="color:#94a3b8; text-align:center; padding:2rem; grid-column:1/-1;">Esperando equipos...</div>';
+        grid.innerHTML = '<div style="color:#94a3b8; text-align:center; padding:2rem; grid-column:1/-1;">Esperando equipos conectados...</div>';
         select.innerHTML = '<option value="">Selecciona un estudiante...</option>';
         return;
       }

@@ -16,33 +16,12 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 
-// Servir la interfaz pública
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// Endpoint de Identidad HTTP
-app.get('/api/identity', (req, res) => {
-  res.json({
-    service: 'AULA_CONTROL_MASTER',
-    port: PORT,
-    name: os.hostname()
-  });
-});
-
-// Estado global en memoria
-const studentsMap = new Map(); // Connected active sockets
-const unlinkedRadarDevices = new Map(); // Discovered via UDP but not connected to socket yet
-
-function broadcastStudentsList() {
-  const list = Array.from(studentsMap.values());
-  io.emit('students-list', list);
-  io.emit('update-student-list', list);
-}
-
-function broadcastUnlinkedRadarDevices() {
-  const unlinkedList = Array.from(unlinkedRadarDevices.values());
-  io.emit('update-radar-unlinked', unlinkedList);
-}
+let maestroInstanceId = null;
+let maestroUdpSocket = null;
+let maestroUdpInterval = null;
 
 function getLocalIPv4Address() {
   const interfaces = os.networkInterfaces();
@@ -56,14 +35,44 @@ function getLocalIPv4Address() {
   return '127.0.0.1';
 }
 
+app.get('/api/identity', (req, res) => {
+  res.json({
+    service: 'AULA_CONTROL_MASTER',
+    port: PORT,
+    name: os.hostname(),
+    instanceId: maestroInstanceId,
+    hostIp: getLocalIPv4Address()
+  });
+});
+
+const studentsMap = new Map();
+const unlinkedRadarDevices = new Map();
+
+function broadcastStudentsList() {
+  const list = Array.from(studentsMap.values());
+  io.emit('students-list', list);
+  io.emit('update-student-list', list);
+}
+
+function broadcastUnlinkedRadarDevices() {
+  const unlinkedList = Array.from(unlinkedRadarDevices.values());
+  io.emit('update-radar-unlinked', unlinkedList);
+}
+
 function registerOrUpdateStudent(socket, data = {}) {
-  const clientIp = data.ip || socket.handshake.address.replace(/^.*:/, '') || '127.0.0.1';
+  let rawIp = socket.handshake.address || '';
+  let clientIp = rawIp.replace(/^.*:/, '').replace(/^::ffff:/, '').trim();
+
+  if ((!clientIp || clientIp === '127.0.0.1' || clientIp === 'localhost') && data.ip && data.ip !== 'Cliente') {
+    clientIp = data.ip;
+  }
+
   const existing = studentsMap.get(socket.id) || {};
 
   const studentInfo = {
     id: socket.id,
     hostname: data.hostname || data.name || existing.hostname || `Estudiante-${socket.id.slice(0, 4)}`,
-    ip: clientIp,
+    ip: clientIp || '127.0.0.1',
     status: 'online',
     handRaised: typeof data.handRaised === 'boolean' ? data.handRaised : (existing.handRaised || false),
     handRaisedAt: data.handRaisedAt || existing.handRaisedAt || null,
@@ -75,23 +84,22 @@ function registerOrUpdateStudent(socket, data = {}) {
 
   studentsMap.set(socket.id, studentInfo);
 
-  // Remover de la lista de no vinculados
   for (const [key, dev] of unlinkedRadarDevices.entries()) {
     if (dev.ip === clientIp || dev.hostname === studentInfo.hostname) {
       unlinkedRadarDevices.delete(key);
     }
   }
 
-  console.log(`[Estudiante Registrado] ${studentInfo.hostname} (${studentInfo.ip})`);
+  console.log(`[Estudiante Registrado] ${studentInfo.hostname} (IP: ${studentInfo.ip}) - Socket ID: ${socket.id}`);
   broadcastStudentsList();
   broadcastUnlinkedRadarDevices();
 }
 
 io.on('connection', (socket) => {
-  const clientIp = socket.handshake.address.replace(/^.*:/, '') || '127.0.0.1';
-  console.log(`[+] Conexión establecida: ${socket.id} (IP: ${clientIp})`);
+  const rawIp = socket.handshake.address || '';
+  const clientIp = rawIp.replace(/^.*:/, '').replace(/^::ffff:/, '').trim() || '127.0.0.1';
+  console.log(`[+] Conexión socket recibida: ${socket.id} (IP Handshake: ${clientIp})`);
 
-  // Enviar listas al conectar
   socket.emit('students-list', Array.from(studentsMap.values()));
   socket.emit('update-student-list', Array.from(studentsMap.values()));
   socket.emit('update-radar-unlinked', Array.from(unlinkedRadarDevices.values()));
@@ -101,7 +109,7 @@ io.on('connection', (socket) => {
   socket.on('student-join', (data) => registerOrUpdateStudent(socket, data));
 
   socket.on('maestro-joined', () => {
-    console.log('[Server] Maestro unido. Emitiendo actualización de listas...');
+    console.log('[Server] Maestro unido a la sesión.');
     socket.emit('students-list', Array.from(studentsMap.values()));
     socket.emit('update-student-list', Array.from(studentsMap.values()));
     socket.emit('update-radar-unlinked', Array.from(unlinkedRadarDevices.values()));
@@ -284,11 +292,14 @@ io.on('connection', (socket) => {
   });
 });
 
-// Emisión Radar UDP Maestro y Captura de Anuncios Estudiante
-let maestroUdpSocket = null;
+function startMaestroUdpBroadcast(port = 3000, instanceId = null) {
+  if (instanceId) maestroInstanceId = instanceId;
 
-function startMaestroUdpBroadcast(port = 3000) {
   try {
+    if (maestroUdpSocket) {
+      try { maestroUdpSocket.close(); } catch(e){}
+    }
+
     maestroUdpSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
     maestroUdpSocket.on('message', (msg, rinfo) => {
@@ -296,7 +307,6 @@ function startMaestroUdpBroadcast(port = 3000) {
         const data = JSON.parse(msg.toString());
         if (data && data.type === 'AULA_RADAR_ANNOUNCE') {
           const devIp = rinfo.address;
-          // Verificar si ya está conectado activamente vía socket
           let isConnected = false;
           for (const s of studentsMap.values()) {
             if (s.ip === devIp || s.hostname === data.hostname) {
@@ -319,41 +329,66 @@ function startMaestroUdpBroadcast(port = 3000) {
 
     maestroUdpSocket.bind(41234, () => {
       maestroUdpSocket.setBroadcast(true);
-      console.log('[Radar Maestro UDP] Emisión y escucha activada en puerto 41234');
+      console.log('[Radar Maestro UDP] Emisión AULA_CONTROL_MASTER activada en puerto 41234 con InstanceId:', maestroInstanceId);
     });
 
-    setInterval(() => {
+    if (maestroUdpInterval) clearInterval(maestroUdpInterval);
+
+    maestroUdpInterval = setInterval(() => {
       if (!maestroUdpSocket) return;
       const payload = JSON.stringify({
         service: 'AULA_CONTROL_MASTER',
         port: port,
         name: os.hostname(),
+        instanceId: maestroInstanceId,
+        hostIp: getLocalIPv4Address(),
         timestamp: Date.now()
       });
       const msg = Buffer.from(payload);
-      maestroUdpSocket.send(msg, 0, msg.length, 41234, '255.255.255.255', (err) => {
-        if (err && err.code !== 'EADDRNOTAVAIL') {}
-      });
+      maestroUdpSocket.send(msg, 0, msg.length, 41234, '255.255.255.255', (err) => {});
     }, 3000);
   } catch (err) {
     console.warn('[Radar Maestro UDP Error]:', err.message);
   }
 }
 
-function startEmbeddedServer(port = PORT) {
+function stopMaestroUdpBroadcast() {
+  if (maestroUdpInterval) {
+    clearInterval(maestroUdpInterval);
+    maestroUdpInterval = null;
+  }
+  if (maestroUdpSocket) {
+    try { maestroUdpSocket.close(); } catch(e){}
+    maestroUdpSocket = null;
+  }
+}
+
+function startEmbeddedServer(port = PORT, instanceId = null) {
+  if (instanceId) maestroInstanceId = instanceId;
   return new Promise((resolve) => {
+    if (server.listening) {
+      startMaestroUdpBroadcast(port, instanceId);
+      return resolve(server);
+    }
     server.listen(port, () => {
       console.log(`=================================`);
       console.log(` Servidor Maestro Aula Control escuchando en:`);
       console.log(` http://localhost:${port}`);
       console.log(`=================================`);
-      startMaestroUdpBroadcast(port);
+      startMaestroUdpBroadcast(port, instanceId);
       resolve(server);
     });
   });
 }
 
-module.exports = { app, server, io, startEmbeddedServer };
+function stopEmbeddedServer() {
+  stopMaestroUdpBroadcast();
+  studentsMap.clear();
+  unlinkedRadarDevices.clear();
+  console.log('[Server Maestro] Sesión de servidor y broadcast UDP detenidos.');
+}
+
+module.exports = { app, server, io, startEmbeddedServer, stopEmbeddedServer };
 
 if (require.main === module) {
   startEmbeddedServer(PORT);
