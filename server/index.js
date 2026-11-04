@@ -45,6 +45,7 @@ app.get('/api/identity', (req, res) => {
   });
 });
 
+// Mapas de datos en memoria
 const studentsMap = new Map();
 const unlinkedRadarDevices = new Map();
 
@@ -90,7 +91,9 @@ function registerOrUpdateStudent(socket, data = {}) {
     }
   }
 
-  console.log(`[Estudiante Registrado] ${studentInfo.hostname} (IP: ${studentInfo.ip}) - Socket ID: ${socket.id}`);
+  console.log(`[Estudiante Registrado] ${studentInfo.hostname} (${studentInfo.ip}) - Socket ID: ${socket.id}`);
+  
+  // Re-renderizado inmediato de la lista/grilla del Maestro
   broadcastStudentsList();
   broadcastUnlinkedRadarDevices();
 }
@@ -98,7 +101,7 @@ function registerOrUpdateStudent(socket, data = {}) {
 io.on('connection', (socket) => {
   const rawIp = socket.handshake.address || '';
   const clientIp = rawIp.replace(/^.*:/, '').replace(/^::ffff:/, '').trim() || '127.0.0.1';
-  console.log(`[+] Conexión socket recibida: ${socket.id} (IP Handshake: ${clientIp})`);
+  console.log(`[+] Conexión socket recibida: ${socket.id} (IP: ${clientIp})`);
 
   socket.emit('students-list', Array.from(studentsMap.values()));
   socket.emit('update-student-list', Array.from(studentsMap.values()));
@@ -109,9 +112,10 @@ io.on('connection', (socket) => {
   socket.on('student-join', (data) => registerOrUpdateStudent(socket, data));
 
   socket.on('maestro-joined', () => {
-    console.log('[Server] Maestro unido a la sesión.');
-    socket.emit('students-list', Array.from(studentsMap.values()));
-    socket.emit('update-student-list', Array.from(studentsMap.values()));
+    console.log('[Server] Maestro unido. Enviando estado actual...');
+    const currentList = Array.from(studentsMap.values());
+    socket.emit('students-list', currentList);
+    socket.emit('update-student-list', currentList);
     socket.emit('update-radar-unlinked', Array.from(unlinkedRadarDevices.values()));
     io.emit('sync-request');
   });
@@ -282,11 +286,14 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Manejo de desconexión del estudiante
   socket.on('disconnect', () => {
     if (studentsMap.has(socket.id)) {
       const student = studentsMap.get(socket.id);
       console.log(`[-] Estudiante desconectado: ${student.hostname}`);
       studentsMap.delete(socket.id);
+
+      // Re-emitir inmediatamente la lista actualizada para re-renderizar la UI del Maestro
       broadcastStudentsList();
     }
   });
@@ -385,7 +392,15 @@ function stopEmbeddedServer() {
   stopMaestroUdpBroadcast();
   studentsMap.clear();
   unlinkedRadarDevices.clear();
-  console.log('[Server Maestro] Sesión de servidor y broadcast UDP detenidos.');
+
+  if (server && server.listening) {
+    try {
+      server.close(() => {
+        console.log('[Server] Servidor HTTP y Socket.io local detenido.');
+      });
+    } catch (e) {}
+  }
+  console.log('[Server Maestro] Limpieza total de sesión completada.');
 }
 
 module.exports = { app, server, io, startEmbeddedServer, stopEmbeddedServer };
