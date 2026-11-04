@@ -1,0 +1,29 @@
+{
+  "name": "aula-control",
+  "version": "2.0.0",
+  "description": "Sistema de Control y Colaboración de Aula - Aplicación Unificada",
+  "main": "student-app/main.js",
+  "scripts": {
+    "start": "electron student-app/main.js",
+    "start:app": "electron student-app/main.js",
+    "start:server": "node server/index.js",
+    "start:student": "electron student-app/main.js"
+  },
+  "keywords": [
+    "aula",
+    "control",
+    "webrtc",
+    "electron",
+    "socket.io"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.7.5"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0"
+  }
+}
