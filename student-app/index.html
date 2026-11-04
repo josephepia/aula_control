@@ -8,7 +8,6 @@
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
     body { background-color: #f1f5f9; color: #0f172a; min-height: 100vh; display: flex; flex-direction: column; }
 
-    /* App Header */
     header { background: #0f172a; color: white; padding: 0.85rem 1.25rem; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
     header h1 { font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; }
 
@@ -18,39 +17,30 @@
     .status-badge.searching { background: #f59e0b; }
     .status-badge.disconnected { background: #ef4444; }
 
-    /* Nav Tabs en Modo Maestro */
     .maestro-nav-bar { background: #1e293b; padding: 0.5rem 1.25rem; display: none; gap: 0.5rem; border-bottom: 1px solid #334155; }
     .maestro-nav-bar.active { display: flex; }
-    .nav-tab-btn { background: transparent; border: none; color: #cbd5e1; padding: 0.45rem 0.85rem; border-radius: 0.375rem; font-weight: 700; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; }
+    .nav-tab-btn { background: transparent; border: none; color: #cbd5e1; padding: 0.45rem 0.85rem; border-radius: 0.375rem; font-weight: 700; font-size: 0.85rem; cursor: pointer; }
     .nav-tab-btn:hover { background: #334155; color: white; }
     .nav-tab-btn.active { background: #3b82f6; color: white; }
 
-    /* Layout Content */
     .app-body { flex: 1; padding: 1.25rem; display: flex; flex-direction: column; gap: 1rem; overflow-y: auto; }
 
     .card { background: white; border-radius: 0.5rem; border: 1px solid #e2e8f0; padding: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
     .card-header { font-weight: 700; font-size: 0.95rem; margin-bottom: 0.75rem; color: #1e293b; display: flex; justify-content: space-between; align-items: center; }
 
-    /* Buttons */
     .btn { padding: 0.5rem 1rem; border-radius: 0.375rem; border: none; font-weight: 700; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; }
     .btn-primary { background: #3b82f6; color: white; }
     .btn-primary:hover { background: #2563eb; }
     .btn-success { background: #10b981; color: white; }
-    .btn-success:hover { background: #059669; }
     .btn-danger { background: #ef4444; color: white; }
-    .btn-danger:hover { background: #dc2626; }
     .btn-warning { background: #f59e0b; color: white; }
-    .btn-warning:hover { background: #d97706; }
     .btn-secondary { background: #64748b; color: white; }
-    .btn-secondary:hover { background: #475569; }
     .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
 
-    /* Modo Estudiante Layout */
     .student-view-container { display: flex; flex-direction: column; gap: 1rem; }
     .connection-form { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
     .connection-form input { padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 0.375rem; font-size: 0.85rem; outline: none; }
 
-    /* Radar Status Indicator Bar */
     .radar-status-bar { padding: 0.6rem 0.85rem; border-radius: 0.375rem; font-size: 0.825rem; font-weight: 700; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; background: #fffbeb; border: 1px solid #fcd34d; color: #b45309; }
     .radar-status-bar.found { background: #f0fdf4; border-color: #bbf7d0; color: #15803d; }
 
@@ -64,47 +54,37 @@
     .msg { background: white; border: 1px solid #e2e8f0; border-radius: 0.375rem; padding: 0.45rem 0.65rem; font-size: 0.85rem; max-width: 85%; }
     .msg.maestro { background: #eff6ff; border-color: #bfdbfe; font-weight: 500; align-self: flex-start; }
     .msg.self { align-self: flex-end; background: #f0fdf4; border-color: #bbf7d0; }
-    .msg .sender { font-weight: 700; font-size: 0.7rem; color: #64748b; }
     .chat-input-bar { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
     .chat-input-bar input { flex: 1; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 0.375rem; font-size: 0.85rem; outline: none; }
 
-    /* Modo Maestro Panels */
     .maestro-panel { display: none; flex-direction: column; gap: 1rem; }
     .maestro-panel.active { display: flex; }
 
-    /* Grid/Table Equipos */
     .students-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
     .student-card { background: white; border: 1px solid #cbd5e1; border-radius: 0.5rem; padding: 0.85rem; display: flex; flex-direction: column; gap: 0.5rem; }
     .student-card.hand-active { border-color: #f59e0b; background: #fffbeb; }
 
-    /* Explorador de Archivos Remoto (FS) */
     .fs-explorer { display: flex; flex-direction: column; gap: 0.75rem; }
     .fs-toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; background: #f8fafc; padding: 0.6rem; border-radius: 0.375rem; border: 1px solid #e2e8f0; }
-    .fs-breadcrumb { font-weight: 700; font-size: 0.85rem; color: #3b82f6; word-break: break-all; flex: 1; }
     .fs-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
     .fs-table th { background: #f1f5f9; text-align: left; padding: 0.5rem 0.75rem; color: #475569; font-size: 0.75rem; }
     .fs-table td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #f1f5f9; cursor: pointer; }
-    .fs-table tr:hover { background: #f8fafc; }
 
-    /* Modal Login Admin */
     .modal-overlay { display: none; position: fixed; top:0; left:0; width:100vw; height:100vh; background: rgba(0,0,0,0.6); z-index: 9999; justify-content: center; align-items: center; }
     .modal-overlay.active { display: flex; }
     .modal-box { background: white; border-radius: 0.63rem; width: 380px; padding: 1.5rem; box-shadow: 0 10px 25px rgba(0,0,0,0.2); display: flex; flex-direction: column; gap: 1rem; }
-    .modal-box h2 { font-size: 1.1rem; font-weight: 700; color: #0f172a; }
     .modal-box input { padding: 0.55rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 0.375rem; outline: none; font-size: 0.9rem; }
 
-    /* Modal Video WebRTC Nativo a 60 FPS */
     .webrtc-modal-overlay { display: none; position: fixed; top:0; left:0; width:100vw; height:100vh; background: rgba(0,0,0,0.92); z-index: 10000; flex-direction: column; }
     .webrtc-modal-overlay.active { display: flex; }
     .webrtc-header { padding: 0.75rem 1.25rem; background: #0f172a; color: white; display: flex; justify-content: space-between; align-items: center; }
     .webrtc-body { flex: 1; display: flex; justify-content: center; align-items: center; padding: 1rem; overflow: hidden; }
-    .webrtc-body video { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 0.5rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    .webrtc-body video { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 0.5rem; }
     .badge-60fps { background: #10b981; color: white; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; font-weight: 800; }
   </style>
 </head>
 <body>
 
-  <!-- App Header -->
   <header>
     <h1>🎒 Aula Control — App Unificada</h1>
     <div class="header-actions">
@@ -114,7 +94,6 @@
     </div>
   </header>
 
-  <!-- Nav Tabs para el Maestro -->
   <div class="maestro-nav-bar" id="maestro-nav-bar">
     <button class="nav-tab-btn active" onclick="switchMaestroTab('tab-dashboard')">🖥️ Panel Maestro</button>
     <button class="nav-tab-btn" onclick="switchMaestroTab('tab-fs')">📁 Explorador de Archivos Remoto</button>
@@ -122,7 +101,7 @@
 
   <div class="app-body">
 
-    <!-- SECCIÓN MODO ESTUDIANTE (POR DEFECTO) -->
+    <!-- SECCIÓN MODO ESTUDIANTE -->
     <div id="student-section" class="student-view-container">
       <div class="card">
         <div class="card-header">
@@ -136,9 +115,10 @@
         </div>
 
         <div class="connection-form">
-          <input type="text" id="server-url" value="http://localhost:3000" placeholder="Servidor (ej. http://192.168.1.50:3000)" style="flex:2; min-width: 200px;" />
+          <input type="text" id="server-url" value="http://localhost:3000" placeholder="Servidor (ej. http://10.117.33.92:3000)" style="flex:2; min-width: 200px;" />
           <input type="text" id="student-name" placeholder="Nombre de Equipo" style="flex:1; min-width: 150px;" />
-          <button class="btn btn-primary" onclick="connectToServer()">Conectar</button>
+          <button id="connect-btn" class="btn btn-primary" onclick="connectToServer()">Conectar</button>
+          <button id="disconnect-btn" class="btn btn-danger" style="display:none;" onclick="disconnectFromServer()">Desconectar</button>
         </div>
       </div>
 
@@ -177,10 +157,9 @@
       </div>
     </div>
 
-    <!-- SECCIÓN MODO MAESTRO (DESBLOQUEADO TRAS LOGIN) -->
+    <!-- SECCIÓN MODO MAESTRO -->
     <div id="maestro-section" style="display:none; flex-direction:column; gap:1rem;">
 
-      <!-- Tab 1: Dashboard y Grilla de Equipos -->
       <div id="tab-dashboard" class="maestro-panel active">
         <div class="card">
           <div class="card-header">
@@ -194,7 +173,6 @@
         </div>
       </div>
 
-      <!-- Tab 2: Explorador de Archivos Remoto (FS Sync) -->
       <div id="tab-fs" class="maestro-panel">
         <div class="card fs-explorer">
           <div class="card-header">
@@ -216,7 +194,7 @@
           </div>
 
           <div style="font-size:0.85rem; padding:0.4rem 0;">
-            Ruta Actual: <span id="fs-current-path" class="fs-breadcrumb">/</span>
+            Ruta Actual: <span id="fs-current-path" style="font-weight:700; color:#3b82f6;">/</span>
           </div>
 
           <table class="fs-table">
@@ -242,7 +220,6 @@
 
   </div>
 
-  <!-- Modal Login Administrador -->
   <div class="modal-overlay" id="login-modal">
     <div class="modal-box">
       <h2>🔐 Acceso Profesor / Administrador</h2>
@@ -257,7 +234,6 @@
     </div>
   </div>
 
-  <!-- Modal Video WebRTC Nativo a 60 FPS -->
   <div class="webrtc-modal-overlay" id="webrtc-modal">
     <div class="webrtc-header">
       <h2 style="font-size:1rem; font-weight:700; display:flex; align-items:center; gap:0.6rem;">
@@ -275,24 +251,21 @@
     let isHandRaised = false;
     let isMaestroLogged = false;
 
-    // WebRTC Connections State
     let peerConnection = null;
     let activeWebRTCStudentId = null;
 
-    // FS Explorer State
     let currentFSPath = 'HOME';
     let currentFSStudentId = null;
 
     let studentsList = [];
 
-    // Inicializar app
     window.addEventListener('DOMContentLoaded', async () => {
       if (window.studentAPI && window.studentAPI.getDefaultHostname) {
         const defaultName = await window.studentAPI.getDefaultHostname();
         document.getElementById('student-name').value = defaultName;
       }
 
-      // 1. Escuchar Auto-Descubrimiento de Maestro mediante Radar UDP o Escaneo de Subred
+      // Auto-Descubrimiento UDP o Subred
       window.studentAPI.onMaestroAutoDiscovered((data) => {
         console.log('[Radar Auto-Discovered]:', data);
         const serverInput = document.getElementById('server-url');
@@ -302,31 +275,37 @@
         const text = document.getElementById('radar-status-text');
 
         banner.className = 'radar-status-bar found';
-        text.innerText = `🟢 Conectado a Maestro en ${data.ip} (${data.method === 'UDP_RADAR' ? 'UDP Radar' : 'Subred Scan'})`;
+        text.innerText = `🟢 Conectado a Maestro en ${data.ip}`;
 
         const badge = document.getElementById('conn-badge');
         badge.innerText = `🟢 ${data.ip}`;
         badge.className = 'status-badge connected';
       });
 
-      // Escuchar eventos WebRTC en el cliente estudiante
       setupStudentWebRTCListeners();
 
-      // Escuchar eventos FS en Maestro
       window.studentAPI.onFSDirectoryResult((data) => handleFSDirectoryResult(data));
       window.studentAPI.onFSOperationResult((data) => handleFSOperationResult(data));
 
-      // Auto-Conectar localmente por defecto
+      window.studentAPI.onUpdateStudentList((list) => {
+        updateMaestroGrid(list);
+      });
+
       connectToServer();
     });
 
-    // Conectar al Servidor Maestro
     async function connectToServer() {
       const serverUrl = document.getElementById('server-url').value.trim();
       const hostname = document.getElementById('student-name').value.trim();
 
       if (!serverUrl) return alert('Ingresa la URL del servidor maestro.');
       await window.studentAPI.connectServer({ serverUrl, hostname });
+    }
+
+    async function disconnectFromServer() {
+      if (window.studentAPI && window.studentAPI.disconnectServer) {
+        await window.studentAPI.disconnectServer();
+      }
     }
 
     function triggerRadarReScan() {
@@ -340,7 +319,6 @@
       }
     }
 
-    // Toggle Mano Levantada
     async function toggleHand() {
       const res = await window.studentAPI.toggleHand();
       if (res.success) {
@@ -365,7 +343,6 @@
       }
     }
 
-    // Chat
     async function sendChat() {
       const input = document.getElementById('chat-input');
       const msg = input.value.trim();
@@ -379,7 +356,6 @@
       if (e.key === 'Enter') sendChat();
     }
 
-    // --- MODAL DE LOGIN MAESTRO (admin / admin123) ---
     function openLoginModal() {
       document.getElementById('login-modal').classList.add('active');
     }
@@ -396,10 +372,8 @@
         isMaestroLogged = true;
         closeLoginModal();
 
-        // Iniciar servidor Maestro embebido
         await window.studentAPI.startMaestroServer();
 
-        // Actualizar UI para Maestro
         document.getElementById('admin-login-btn').style.display = 'none';
         document.getElementById('admin-logout-btn').style.display = 'inline-flex';
         document.getElementById('maestro-nav-bar').classList.add('active');
@@ -427,7 +401,7 @@
       document.getElementById(tabId).classList.add('active');
     }
 
-    // --- WEBRTC TRANSMISIÓN NATIVA EN TIEMPO REAL ---
+    // WebRTC
     function setupStudentWebRTCListeners() {
       window.studentAPI.onWebRTCOfferReceived(async (data) => {
         const { senderSocketId, offer } = data;
@@ -539,7 +513,7 @@
       document.getElementById('webrtc-remote-video').srcObject = null;
     }
 
-    // --- GESTOR DE ARCHIVOS REMOTO (FS SYNC) ---
+    // FS Sync
     function loadStudentDirectory(dirPath) {
       const select = document.getElementById('fs-student-select');
       const studentId = select.value;
@@ -617,15 +591,24 @@
       }
     }
 
-    // Escuchadores de Eventos de Estado
+    // Status listeners
     window.studentAPI.onConnectionStatus((data) => {
       const badge = document.getElementById('conn-badge');
+      const connBtn = document.getElementById('connect-btn');
+      const disconnBtn = document.getElementById('disconnect-btn');
+
       if (data.connected) {
         badge.innerText = 'Conectado';
         badge.className = 'status-badge connected';
+        connBtn.innerText = '🟢 Conectado';
+        connBtn.disabled = true;
+        disconnBtn.style.display = 'inline-flex';
       } else {
         badge.innerText = 'Desconectado';
         badge.className = 'status-badge searching';
+        connBtn.innerText = 'Conectar';
+        connBtn.disabled = false;
+        disconnBtn.style.display = 'none';
       }
     });
 
@@ -658,6 +641,43 @@
       chatBox.appendChild(msgDiv);
       chatBox.scrollTop = chatBox.scrollHeight;
     });
+
+    function updateMaestroGrid(list) {
+      studentsList = list;
+      const grid = document.getElementById('maestro-students-grid');
+      const select = document.getElementById('fs-student-select');
+
+      if (list.length === 0) {
+        grid.innerHTML = '<div style="color:#94a3b8; text-align:center; padding:2rem; grid-column:1/-1;">Esperando equipos...</div>';
+        select.innerHTML = '<option value="">Selecciona un estudiante...</option>';
+        return;
+      }
+
+      select.innerHTML = '<option value="">Selecciona un estudiante...</option>' + list.map(s => `
+        <option value="${s.id}">${escapeHtml(s.hostname)} (${s.ip})</option>
+      `).join('');
+
+      grid.innerHTML = list.map(s => `
+        <div class="student-card ${s.handRaised ? 'hand-active' : ''}">
+          <div style="display:flex; justify-content:space-between; font-weight:700;">
+            <span>💻 ${escapeHtml(s.hostname)}</span>
+            ${s.handRaised ? '✋' : ''}
+          </div>
+          <div style="font-size:0.75rem; color:#64748b;">IP: ${s.ip}</div>
+          <div style="font-size:0.7rem; color:#10b981; font-weight:700;">🟢 Online</div>
+          <div style="display:flex; gap:0.3rem; margin-top:0.3rem;">
+            <button class="btn btn-primary btn-sm" onclick="startWebRTCStream('${s.id}')">⚡ Ver WebRTC 60 FPS</button>
+            <button class="btn btn-secondary btn-sm" onclick="openFSForStudent('${s.id}')">📁 Archivos</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function openFSForStudent(id) {
+      switchMaestroTab('tab-fs');
+      document.getElementById('fs-student-select').value = id;
+      loadStudentDirectory('HOME');
+    }
 
     function escapeHtml(str) {
       if (!str) return '';

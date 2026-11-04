@@ -19,9 +19,72 @@ let udpSocket = null;
 let maestroDiscovered = false;
 let autoConnectActive = true;
 let fallbackScanTimer = null;
+let forceConnectHttpServer = null;
 
 // Servidor local embebido si se activa modo Maestro
 let embeddedServerStarted = false;
+
+function getLocalIPv4Address() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const net of interfaces[name]) {
+      if (net.family === 'IPv4' && !net.internal) {
+        return net.address;
+      }
+    }
+  }
+  return '127.0.0.1';
+}
+
+// --- Servidor HTTP Ligero en Puerto 3001 para "Forzar Conexión / Enlazar" desde el Maestro ---
+function setupForceConnectListener() {
+  try {
+    forceConnectHttpServer = http.createServer((req, res) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+      if (req.method === 'OPTIONS') {
+        res.writeHead(200);
+        return res.end();
+      }
+
+      if (req.url.startsWith('/api/request-socket-connect')) {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+          let maestroUrl = null;
+          try {
+            const data = JSON.parse(body);
+            maestroUrl = data.maestroUrl;
+          } catch (e) {
+            const urlObj = new URL(req.url, 'http://localhost:3001');
+            maestroUrl = urlObj.searchParams.get('maestroUrl');
+          }
+
+          if (maestroUrl) {
+            console.log(`[Force Connect] Petición recibida del Maestro para conectar a: ${maestroUrl}`);
+            notifyMaestroDiscovered(maestroUrl.replace(/^https?:\/\//, '').split(':')[0], 3000, 'Maestro-PC', 'FORCE_LINK');
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            return res.end(JSON.stringify({ success: true, message: 'Enlazado correctamente.' }));
+          }
+
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: 'maestroUrl requerido' }));
+        });
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+
+    forceConnectHttpServer.listen(3001, () => {
+      console.log('[Force Connect Listener] Escuchando solicitudes de enlace en puerto 3001');
+    });
+  } catch (err) {
+    console.warn('[Force Connect Listener Error]:', err.message);
+  }
+}
 
 // --- 1. RECEPCIÓN DE RADAR UDP MAESTRO ---
 function setupRadarListener() {
@@ -38,22 +101,18 @@ function setupRadarListener() {
         if (data && data.service === 'AULA_CONTROL_MASTER') {
           const maestroIp = rinfo.address;
           const maestroPort = data.port || 3000;
-          const maestroUrl = `http://${maestroIp}:${maestroPort}`;
 
           if (!maestroDiscovered) {
             maestroDiscovered = true;
-            console.log(`[Radar UDP] Maestro detectado en: ${maestroUrl} (${data.name || 'Maestro-PC'})`);
             notifyMaestroDiscovered(maestroIp, maestroPort, data.name || 'Maestro-PC', 'UDP_RADAR');
           }
         }
-      } catch (e) {
-        // Ignorar paquetes no válidos
-      }
+      } catch (e) {}
     });
 
     udpSocket.bind(RADAR_PORT, () => {
       udpSocket.setBroadcast(true);
-      console.log(`[Radar UDP Student] Escuchando maestro en puerto UDP ${RADAR_PORT}`);
+      console.log(`[Radar UDP Student] Escuchando en puerto UDP ${RADAR_PORT}`);
     });
 
   } catch (err) {
@@ -78,7 +137,6 @@ function runSubnetScanFallback() {
 
   for (const name of Object.keys(interfaces)) {
     for (const net of interfaces[name]) {
-      // Filtrar IPv4 internas (ej. 192.168.X.X, 10.X.X.X, 172.16.X.X)
       if (net.family === 'IPv4' && !net.internal) {
         const ipParts = net.address.split('.');
         if (ipParts.length === 4) {
@@ -91,13 +149,9 @@ function runSubnetScanFallback() {
     }
   }
 
-  if (subnetsToScan.length === 0) {
-    console.log('[Subnet Scan] No se detectaron interfaces de red locales activas.');
-    return;
-  }
+  if (subnetsToScan.length === 0) return;
 
   subnetsToScan.forEach(subnet => {
-    console.log(`[Subnet Scan] Escaneando subred: ${subnet}.1 a ${subnet}.254 en puerto 3000...`);
     for (let i = 1; i <= 254; i++) {
       if (maestroDiscovered) break;
       const targetIp = `${subnet}.${i}`;
@@ -151,13 +205,12 @@ function notifyMaestroDiscovered(ip, port, name, method) {
     });
   }
 
-  // Auto-conectar automáticamente WebSocket si está activo
   if (autoConnectActive) {
     connectToMaestroSocket(url);
   }
 }
 
-// --- CONEXIÓN AUTOMÁTICA Y LÓGICA DE ELECTRON ---
+// Modificar hosts
 function getHostsPath() {
   if (process.platform === 'win32') {
     return 'C:\\Windows\\System32\\drivers\\etc\\hosts';
@@ -241,7 +294,6 @@ function unblockDNS() {
   }
 }
 
-// Miniaturas de pantalla para Grilla
 async function captureAndSendScreen() {
   if (isCapturing) return;
   isCapturing = true;
@@ -281,12 +333,14 @@ function stopScreenSharing() {
 
 function sendStudentRegistration() {
   if (socket && socket.connected) {
+    const localIp = getLocalIPv4Address();
     const payload = {
       hostname: currentStudentName || os.hostname() || 'Estudiante-PC',
-      ip: 'Cliente'
+      ip: localIp,
+      status: 'online'
     };
-    socket.emit('student-join', payload);
     socket.emit('register-student', payload);
+    socket.emit('student-join', payload);
   }
 }
 
@@ -342,7 +396,7 @@ function connectToMaestroSocket(serverUrl) {
     if (mainWindow) mainWindow.webContents.send('dns-status', { blocked: false });
   });
 
-  // --- SEÑALIZACIÓN WEBRTC PEER-TO-PEER ---
+  // WebRTC Signal Relays
   socket.on('webrtc-offer', (data) => {
     if (mainWindow) mainWindow.webContents.send('webrtc-offer-received', data);
   });
@@ -355,7 +409,7 @@ function connectToMaestroSocket(serverUrl) {
     if (mainWindow) mainWindow.webContents.send('webrtc-answer-received', data);
   });
 
-  // --- EXPLORADOR DE ARCHIVOS REMOTO (FS ENGINE EN ESTUDIANTE) ---
+  // FS Engine
   socket.on('fs-read-directory', (payload) => {
     const { requesterSocketId, dirPath } = payload;
     let targetPath = dirPath;
@@ -462,6 +516,10 @@ function connectToMaestroSocket(serverUrl) {
       }
     }
   });
+
+  socket.on('update-student-list', (list) => {
+    if (mainWindow) mainWindow.webContents.send('update-student-list', list);
+  });
 }
 
 function createWindow() {
@@ -487,6 +545,7 @@ function createWindow() {
 app.whenReady().then(() => {
   createWindow();
   setupRadarListener();
+  setupForceConnectListener();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -530,6 +589,15 @@ ipcMain.handle('connect-server', (event, { serverUrl, hostname }) => {
   const defaultName = os.hostname() || 'Estudiante-PC';
   currentStudentName = hostname && hostname.trim() ? hostname.trim() : defaultName;
   connectToMaestroSocket(serverUrl);
+  return { success: true };
+});
+
+ipcMain.handle('disconnect-server', () => {
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
+  stopScreenSharing();
   return { success: true };
 });
 

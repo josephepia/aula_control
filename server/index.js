@@ -18,8 +18,9 @@ const PORT = process.env.PORT || 3000;
 
 // Servir la interfaz pública
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
 
-// 1. Endpoint HTTP de Identidad para escaneo fallback de subred
+// Endpoint de Identidad HTTP
 app.get('/api/identity', (req, res) => {
   res.json({
     service: 'AULA_CONTROL_MASTER',
@@ -28,22 +29,42 @@ app.get('/api/identity', (req, res) => {
   });
 });
 
-// Estado persistente en memoria: key = socket.id -> { id, hostname, ip, handRaised, handRaisedAt, isScreenSharing, blockedDNS, lastScreenFrame, connectedAt }
-const studentsMap = new Map();
+// Estado global en memoria
+const studentsMap = new Map(); // Connected active sockets
+const unlinkedRadarDevices = new Map(); // Discovered via UDP but not connected to socket yet
 
 function broadcastStudentsList() {
   const list = Array.from(studentsMap.values());
   io.emit('students-list', list);
+  io.emit('update-student-list', list);
+}
+
+function broadcastUnlinkedRadarDevices() {
+  const unlinkedList = Array.from(unlinkedRadarDevices.values());
+  io.emit('update-radar-unlinked', unlinkedList);
+}
+
+function getLocalIPv4Address() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const net of interfaces[name]) {
+      if (net.family === 'IPv4' && !net.internal) {
+        return net.address;
+      }
+    }
+  }
+  return '127.0.0.1';
 }
 
 function registerOrUpdateStudent(socket, data = {}) {
-  const clientIp = socket.handshake.address.replace(/^.*:/, '') || '127.0.0.1';
+  const clientIp = data.ip || socket.handshake.address.replace(/^.*:/, '') || '127.0.0.1';
   const existing = studentsMap.get(socket.id) || {};
 
   const studentInfo = {
     id: socket.id,
     hostname: data.hostname || data.name || existing.hostname || `Estudiante-${socket.id.slice(0, 4)}`,
-    ip: data.ip || clientIp,
+    ip: clientIp,
+    status: 'online',
     handRaised: typeof data.handRaised === 'boolean' ? data.handRaised : (existing.handRaised || false),
     handRaisedAt: data.handRaisedAt || existing.handRaisedAt || null,
     isScreenSharing: typeof data.isScreenSharing === 'boolean' ? data.isScreenSharing : (existing.isScreenSharing || false),
@@ -53,27 +74,41 @@ function registerOrUpdateStudent(socket, data = {}) {
   };
 
   studentsMap.set(socket.id, studentInfo);
+
+  // Remover de la lista de no vinculados
+  for (const [key, dev] of unlinkedRadarDevices.entries()) {
+    if (dev.ip === clientIp || dev.hostname === studentInfo.hostname) {
+      unlinkedRadarDevices.delete(key);
+    }
+  }
+
   console.log(`[Estudiante Registrado] ${studentInfo.hostname} (${studentInfo.ip})`);
   broadcastStudentsList();
+  broadcastUnlinkedRadarDevices();
 }
 
 io.on('connection', (socket) => {
   const clientIp = socket.handshake.address.replace(/^.*:/, '') || '127.0.0.1';
   console.log(`[+] Conexión establecida: ${socket.id} (IP: ${clientIp})`);
 
+  // Enviar listas al conectar
   socket.emit('students-list', Array.from(studentsMap.values()));
+  socket.emit('update-student-list', Array.from(studentsMap.values()));
+  socket.emit('update-radar-unlinked', Array.from(unlinkedRadarDevices.values()));
   io.emit('sync-request');
 
   socket.on('register-student', (data) => registerOrUpdateStudent(socket, data));
   socket.on('student-join', (data) => registerOrUpdateStudent(socket, data));
 
   socket.on('maestro-joined', () => {
-    console.log('[Server] Maestro conectado/unido. Solicitando sync-request a estudiantes...');
+    console.log('[Server] Maestro unido. Emitiendo actualización de listas...');
     socket.emit('students-list', Array.from(studentsMap.values()));
+    socket.emit('update-student-list', Array.from(studentsMap.values()));
+    socket.emit('update-radar-unlinked', Array.from(unlinkedRadarDevices.values()));
     io.emit('sync-request');
   });
 
-  // --- SEÑALIZACIÓN WEBRTC PEER-TO-PEER ---
+  // WebRTC Signal Relays
   socket.on('webrtc-offer', (payload) => {
     if (payload && payload.targetSocketId) {
       io.to(payload.targetSocketId).emit('webrtc-offer', {
@@ -101,7 +136,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // --- GESTOR DE ARCHIVOS REMOTO (FS SYNC) ---
+  // FS Engine Relays
   socket.on('fs-read-directory', (payload) => {
     if (payload && payload.targetSocketId && studentsMap.has(payload.targetSocketId)) {
       io.to(payload.targetSocketId).emit('fs-read-directory', {
@@ -144,7 +179,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // --- MANOS LEVANTADAS Y CHAT ---
+  // Hands & Chat
   socket.on('toggle-hand', () => {
     const student = studentsMap.get(socket.id);
     if (student) {
@@ -178,7 +213,7 @@ io.on('connection', (socket) => {
     io.emit('chat-message', messagePayload);
   });
 
-  // --- BLOQUEO DNS ---
+  // DNS
   socket.on('update-dns-list', (payload = {}) => {
     let targetSocketId = null;
     let domains = [];
@@ -249,15 +284,42 @@ io.on('connection', (socket) => {
   });
 });
 
-// 2. Emisión de Radar UDP Maestro
+// Emisión Radar UDP Maestro y Captura de Anuncios Estudiante
 let maestroUdpSocket = null;
 
 function startMaestroUdpBroadcast(port = 3000) {
   try {
     maestroUdpSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
-    maestroUdpSocket.bind(() => {
+
+    maestroUdpSocket.on('message', (msg, rinfo) => {
+      try {
+        const data = JSON.parse(msg.toString());
+        if (data && data.type === 'AULA_RADAR_ANNOUNCE') {
+          const devIp = rinfo.address;
+          // Verificar si ya está conectado activamente vía socket
+          let isConnected = false;
+          for (const s of studentsMap.values()) {
+            if (s.ip === devIp || s.hostname === data.hostname) {
+              isConnected = true;
+              break;
+            }
+          }
+
+          if (!isConnected) {
+            unlinkedRadarDevices.set(devIp, {
+              ip: devIp,
+              hostname: data.hostname || 'Equipo Estudiante LAN',
+              lastSeen: new Date().toLocaleTimeString()
+            });
+            broadcastUnlinkedRadarDevices();
+          }
+        }
+      } catch (e) {}
+    });
+
+    maestroUdpSocket.bind(41234, () => {
       maestroUdpSocket.setBroadcast(true);
-      console.log('[Radar Maestro UDP] Emisión de señal AULA_CONTROL_MASTER activada en puerto 41234');
+      console.log('[Radar Maestro UDP] Emisión y escucha activada en puerto 41234');
     });
 
     setInterval(() => {
@@ -270,9 +332,7 @@ function startMaestroUdpBroadcast(port = 3000) {
       });
       const msg = Buffer.from(payload);
       maestroUdpSocket.send(msg, 0, msg.length, 41234, '255.255.255.255', (err) => {
-        if (err && err.code !== 'EADDRNOTAVAIL') {
-          // ignora errores de interface no disponible
-        }
+        if (err && err.code !== 'EADDRNOTAVAIL') {}
       });
     }, 3000);
   } catch (err) {

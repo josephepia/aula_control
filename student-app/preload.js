@@ -3,12 +3,13 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('studentAPI', {
   // Conexión y Básicos
   connectServer: (data) => ipcRenderer.invoke('connect-server', data),
+  disconnectServer: () => ipcRenderer.invoke('disconnect-server'),
   getDefaultHostname: () => ipcRenderer.invoke('get-default-hostname'),
   toggleHand: () => ipcRenderer.invoke('toggle-hand'),
   sendChat: (message) => ipcRenderer.invoke('send-chat', message),
   startMaestroServer: () => ipcRenderer.invoke('start-maestro-server'),
 
-  // Radar UDP y Auto-Descubrimiento de Maestro
+  // Radar UDP y Auto-Descubrimiento
   restartRadarSearch: () => ipcRenderer.invoke('restart-radar-search'),
   onMaestroAutoDiscovered: (callback) => {
     ipcRenderer.on('maestro-auto-discovered', (event, data) => callback(data));
@@ -45,6 +46,9 @@ contextBridge.exposeInMainWorld('studentAPI', {
   // Eventos de Estado
   onConnectionStatus: (callback) => {
     ipcRenderer.on('connection-status', (event, data) => callback(data));
+  },
+  onUpdateStudentList: (callback) => {
+    ipcRenderer.on('update-student-list', (event, data) => callback(data));
   },
   onDNSStatus: (callback) => {
     ipcRenderer.on('dns-status', (event, data) => callback(data));
