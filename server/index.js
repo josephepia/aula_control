@@ -1,6 +1,8 @@
 const express = require('express');
 const http = require('http');
 const path = require('path');
+const dgram = require('dgram');
+const os = require('os');
 const { Server } = require('socket.io');
 
 const app = express();
@@ -16,6 +18,15 @@ const PORT = process.env.PORT || 3000;
 
 // Servir la interfaz pública
 app.use(express.static(path.join(__dirname, 'public')));
+
+// 1. Endpoint HTTP de Identidad para escaneo fallback de subred
+app.get('/api/identity', (req, res) => {
+  res.json({
+    service: 'AULA_CONTROL_MASTER',
+    port: PORT,
+    name: os.hostname()
+  });
+});
 
 // Estado persistente en memoria: key = socket.id -> { id, hostname, ip, handRaised, handRaisedAt, isScreenSharing, blockedDNS, lastScreenFrame, connectedAt }
 const studentsMap = new Map();
@@ -50,25 +61,21 @@ io.on('connection', (socket) => {
   const clientIp = socket.handshake.address.replace(/^.*:/, '') || '127.0.0.1';
   console.log(`[+] Conexión establecida: ${socket.id} (IP: ${clientIp})`);
 
-  // Estado inicial para nuevos clientes / reconexiones
   socket.emit('students-list', Array.from(studentsMap.values()));
   io.emit('sync-request');
 
-  // Registro de estudiante
   socket.on('register-student', (data) => registerOrUpdateStudent(socket, data));
   socket.on('student-join', (data) => registerOrUpdateStudent(socket, data));
 
   socket.on('maestro-joined', () => {
-    console.log('[Server] Maestro unido/conectado. Solicitando sync-request a estudiantes...');
+    console.log('[Server] Maestro conectado/unido. Solicitando sync-request a estudiantes...');
     socket.emit('students-list', Array.from(studentsMap.values()));
     io.emit('sync-request');
   });
 
-  // --- 1. SEÑALIZACIÓN WEBRTC (PEER-TO-PEER VIDEO) ---
+  // --- SEÑALIZACIÓN WEBRTC PEER-TO-PEER ---
   socket.on('webrtc-offer', (payload) => {
-    // payload: { targetSocketId, offer }
     if (payload && payload.targetSocketId) {
-      console.log(`[WebRTC] Relay OFFER desde ${socket.id} hacia ${payload.targetSocketId}`);
       io.to(payload.targetSocketId).emit('webrtc-offer', {
         senderSocketId: socket.id,
         offer: payload.offer
@@ -77,9 +84,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('webrtc-answer', (payload) => {
-    // payload: { targetSocketId, answer }
     if (payload && payload.targetSocketId) {
-      console.log(`[WebRTC] Relay ANSWER desde ${socket.id} hacia ${payload.targetSocketId}`);
       io.to(payload.targetSocketId).emit('webrtc-answer', {
         senderSocketId: socket.id,
         answer: payload.answer
@@ -88,7 +93,6 @@ io.on('connection', (socket) => {
   });
 
   socket.on('webrtc-candidate', (payload) => {
-    // payload: { targetSocketId, candidate }
     if (payload && payload.targetSocketId) {
       io.to(payload.targetSocketId).emit('webrtc-candidate', {
         senderSocketId: socket.id,
@@ -97,11 +101,9 @@ io.on('connection', (socket) => {
     }
   });
 
-  // --- 2. GESTOR DE ARCHIVOS REMOTO (FS SYNC) ---
+  // --- GESTOR DE ARCHIVOS REMOTO (FS SYNC) ---
   socket.on('fs-read-directory', (payload) => {
-    // payload: { targetSocketId, dirPath }
     if (payload && payload.targetSocketId && studentsMap.has(payload.targetSocketId)) {
-      console.log(`[FS] Solicitando directorio en ${payload.targetSocketId}: ${payload.dirPath}`);
       io.to(payload.targetSocketId).emit('fs-read-directory', {
         requesterSocketId: socket.id,
         dirPath: payload.dirPath
@@ -110,14 +112,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('fs-directory-result', (payload) => {
-    // payload: { requesterSocketId, currentPath, items, error }
     if (payload && payload.requesterSocketId) {
       io.to(payload.requesterSocketId).emit('fs-directory-result', payload);
     }
   });
 
   socket.on('fs-create-directory', (payload) => {
-    // payload: { targetSocketId, parentPath, folderName }
     if (payload && payload.targetSocketId && studentsMap.has(payload.targetSocketId)) {
       io.to(payload.targetSocketId).emit('fs-create-directory', {
         requesterSocketId: socket.id,
@@ -128,9 +128,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('fs-upload-file', (payload) => {
-    // payload: { targetSocketId, targetPath, fileName, fileBase64 }
     if (payload && payload.targetSocketId && studentsMap.has(payload.targetSocketId)) {
-      console.log(`[FS] Enviando archivo ${payload.fileName} a ${payload.targetSocketId}`);
       io.to(payload.targetSocketId).emit('fs-upload-file', {
         requesterSocketId: socket.id,
         targetPath: payload.targetPath,
@@ -141,7 +139,6 @@ io.on('connection', (socket) => {
   });
 
   socket.on('fs-operation-result', (payload) => {
-    // payload: { requesterSocketId, success, message }
     if (payload && payload.requesterSocketId) {
       io.to(payload.requesterSocketId).emit('fs-operation-result', payload);
     }
@@ -153,7 +150,6 @@ io.on('connection', (socket) => {
     if (student) {
       student.handRaised = !student.handRaised;
       student.handRaisedAt = student.handRaised ? new Date().toLocaleTimeString() : null;
-      console.log(`[Mano] ${student.hostname}: ${student.handRaised ? 'Levantada' : 'Bajada'}`);
       broadcastStudentsList();
     }
   });
@@ -182,7 +178,7 @@ io.on('connection', (socket) => {
     io.emit('chat-message', messagePayload);
   });
 
-  // --- DNS LIST MANAGER ---
+  // --- BLOQUEO DNS ---
   socket.on('update-dns-list', (payload = {}) => {
     let targetSocketId = null;
     let domains = [];
@@ -230,7 +226,6 @@ io.on('connection', (socket) => {
     broadcastStudentsList();
   });
 
-  // Recepción de fotogramas de pantalla (Miniaturas Grilla)
   socket.on('screen-frame', (frameData) => {
     const student = studentsMap.get(socket.id);
     if (student) {
@@ -244,7 +239,6 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Desconexión
   socket.on('disconnect', () => {
     if (studentsMap.has(socket.id)) {
       const student = studentsMap.get(socket.id);
@@ -255,6 +249,37 @@ io.on('connection', (socket) => {
   });
 });
 
+// 2. Emisión de Radar UDP Maestro
+let maestroUdpSocket = null;
+
+function startMaestroUdpBroadcast(port = 3000) {
+  try {
+    maestroUdpSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+    maestroUdpSocket.bind(() => {
+      maestroUdpSocket.setBroadcast(true);
+      console.log('[Radar Maestro UDP] Emisión de señal AULA_CONTROL_MASTER activada en puerto 41234');
+    });
+
+    setInterval(() => {
+      if (!maestroUdpSocket) return;
+      const payload = JSON.stringify({
+        service: 'AULA_CONTROL_MASTER',
+        port: port,
+        name: os.hostname(),
+        timestamp: Date.now()
+      });
+      const msg = Buffer.from(payload);
+      maestroUdpSocket.send(msg, 0, msg.length, 41234, '255.255.255.255', (err) => {
+        if (err && err.code !== 'EADDRNOTAVAIL') {
+          // ignora errores de interface no disponible
+        }
+      });
+    }, 3000);
+  } catch (err) {
+    console.warn('[Radar Maestro UDP Error]:', err.message);
+  }
+}
+
 function startEmbeddedServer(port = PORT) {
   return new Promise((resolve) => {
     server.listen(port, () => {
@@ -262,12 +287,12 @@ function startEmbeddedServer(port = PORT) {
       console.log(` Servidor Maestro Aula Control escuchando en:`);
       console.log(` http://localhost:${port}`);
       console.log(`=================================`);
+      startMaestroUdpBroadcast(port);
       resolve(server);
     });
   });
 }
 
-// Permitir require() como módulo desde la app unificada
 module.exports = { app, server, io, startEmbeddedServer };
 
 if (require.main === module) {

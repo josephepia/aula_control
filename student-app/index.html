@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Aula Control — Aplicación Unificada</title>
-  <script src="../node_modules/socket.io-client/dist/socket.io.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
     body { background-color: #f1f5f9; color: #0f172a; min-height: 100vh; display: flex; flex-direction: column; }
@@ -16,6 +15,7 @@
     .header-actions { display: flex; gap: 0.75rem; align-items: center; }
     .status-badge { font-size: 0.75rem; padding: 0.25rem 0.65rem; border-radius: 9999px; font-weight: 700; background: #64748b; color: white; }
     .status-badge.connected { background: #10b981; }
+    .status-badge.searching { background: #f59e0b; }
     .status-badge.disconnected { background: #ef4444; }
 
     /* Nav Tabs en Modo Maestro */
@@ -49,6 +49,10 @@
     .student-view-container { display: flex; flex-direction: column; gap: 1rem; }
     .connection-form { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
     .connection-form input { padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 0.375rem; font-size: 0.85rem; outline: none; }
+
+    /* Radar Status Indicator Bar */
+    .radar-status-bar { padding: 0.6rem 0.85rem; border-radius: 0.375rem; font-size: 0.825rem; font-weight: 700; display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; background: #fffbeb; border: 1px solid #fcd34d; color: #b45309; }
+    .radar-status-bar.found { background: #f0fdf4; border-color: #bbf7d0; color: #15803d; }
 
     .status-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
     .status-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.375rem; padding: 0.75rem; text-align: center; }
@@ -89,7 +93,7 @@
     .modal-box h2 { font-size: 1.1rem; font-weight: 700; color: #0f172a; }
     .modal-box input { padding: 0.55rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 0.375rem; outline: none; font-size: 0.9rem; }
 
-    /* Modal WebRTC Video Nativo a 60 FPS */
+    /* Modal Video WebRTC Nativo a 60 FPS */
     .webrtc-modal-overlay { display: none; position: fixed; top:0; left:0; width:100vw; height:100vh; background: rgba(0,0,0,0.92); z-index: 10000; flex-direction: column; }
     .webrtc-modal-overlay.active { display: flex; }
     .webrtc-header { padding: 0.75rem 1.25rem; background: #0f172a; color: white; display: flex; justify-content: space-between; align-items: center; }
@@ -104,7 +108,7 @@
   <header>
     <h1>🎒 Aula Control — App Unificada</h1>
     <div class="header-actions">
-      <span id="conn-badge" class="status-badge disconnected">Desconectado</span>
+      <span id="conn-badge" class="status-badge searching">🟡 Radar Activo</span>
       <button id="admin-login-btn" class="btn btn-warning btn-sm" onclick="openLoginModal()">🔑 Acceso Profesor / Administrador</button>
       <button id="admin-logout-btn" class="btn btn-danger btn-sm" style="display:none;" onclick="logoutMaestro()">🔒 Cerrar Sesión Maestro</button>
     </div>
@@ -114,7 +118,6 @@
   <div class="maestro-nav-bar" id="maestro-nav-bar">
     <button class="nav-tab-btn active" onclick="switchMaestroTab('tab-dashboard')">🖥️ Panel Maestro</button>
     <button class="nav-tab-btn" onclick="switchMaestroTab('tab-fs')">📁 Explorador de Archivos Remoto</button>
-    <button class="nav-tab-btn" onclick="switchMaestroTab('tab-radar')">📡 Radar LAN Auto-Descubrimiento</button>
   </div>
 
   <div class="app-body">
@@ -124,8 +127,14 @@
       <div class="card">
         <div class="card-header">
           <span>⚙️ Conexión al Servidor Maestro</span>
-          <span id="radar-count-badge" style="font-size:0.75rem; font-weight:600; color:#3b82f6;">Radar LAN Activo</span>
+          <span style="font-size:0.75rem; font-weight:600; color:#3b82f6;">Auto-Descubrimiento UDP/Subred</span>
         </div>
+
+        <div id="radar-status-banner" class="radar-status-bar">
+          <span id="radar-status-text">🟡 Buscando Maestro en la red (Radar activo)...</span>
+          <button class="btn btn-secondary btn-sm" onclick="triggerRadarReScan()">📡 Re-escanear Red</button>
+        </div>
+
         <div class="connection-form">
           <input type="text" id="server-url" value="http://localhost:3000" placeholder="Servidor (ej. http://192.168.1.50:3000)" style="flex:2; min-width: 200px;" />
           <input type="text" id="student-name" placeholder="Nombre de Equipo" style="flex:1; min-width: 150px;" />
@@ -192,7 +201,7 @@
             <span>📁 Explorador de Archivos Remoto de Estudiante</span>
           </div>
           <div class="fs-toolbar">
-            <label style="font-size:0.8rem; font-weight:700;">Estudiante Objetivó:</label>
+            <label style="font-size:0.8rem; font-weight:700;">Estudiante Objetivo:</label>
             <select id="fs-student-select" style="padding:0.4rem; border-radius:0.25rem; border:1px solid #cbd5e1;" onchange="loadStudentDirectory('HOME')">
               <option value="">Selecciona un estudiante...</option>
             </select>
@@ -222,36 +231,6 @@
               <tr>
                 <td colspan="3" style="text-align:center; color:#94a3b8; padding:2rem;">
                   Selecciona un estudiante para explorar sus archivos.
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Tab 3: Radar LAN Auto-Descubrimiento UDP -->
-      <div id="tab-radar" class="maestro-panel">
-        <div class="card">
-          <div class="card-header">
-            <span>📡 Radar LAN de Auto-Descubrimiento Multicast/UDP</span>
-          </div>
-          <p style="font-size:0.85rem; color:#64748b; margin-bottom:1rem;">
-            Detección automática de equipos ejecutando la aplicación en el mismo segmento de red local (Ethernet / Wi-Fi) en el puerto UDP 41234.
-          </p>
-          <table class="fs-table">
-            <thead>
-              <tr>
-                <th>Nombre de Equipo</th>
-                <th>Dirección IP Local</th>
-                <th>Puerto</th>
-                <th>Estado</th>
-                <th>Acción</th>
-              </tr>
-            </thead>
-            <tbody id="radar-peers-tbody">
-              <tr>
-                <td colspan="5" style="text-align:center; color:#94a3b8; padding:2rem;">
-                  Buscando dispositivos en la red LAN...
                 </td>
               </tr>
             </tbody>
@@ -313,9 +292,21 @@
         document.getElementById('student-name').value = defaultName;
       }
 
-      // Escuchar descubrimiento Radar LAN
-      window.studentAPI.onRadarDiscoveredPeers((peers) => {
-        renderRadarPeers(peers);
+      // 1. Escuchar Auto-Descubrimiento de Maestro mediante Radar UDP o Escaneo de Subred
+      window.studentAPI.onMaestroAutoDiscovered((data) => {
+        console.log('[Radar Auto-Discovered]:', data);
+        const serverInput = document.getElementById('server-url');
+        serverInput.value = data.url || `http://${data.ip}:${data.port}`;
+
+        const banner = document.getElementById('radar-status-banner');
+        const text = document.getElementById('radar-status-text');
+
+        banner.className = 'radar-status-bar found';
+        text.innerText = `🟢 Conectado a Maestro en ${data.ip} (${data.method === 'UDP_RADAR' ? 'UDP Radar' : 'Subred Scan'})`;
+
+        const badge = document.getElementById('conn-badge');
+        badge.innerText = `🟢 ${data.ip}`;
+        badge.className = 'status-badge connected';
       });
 
       // Escuchar eventos WebRTC en el cliente estudiante
@@ -336,6 +327,17 @@
 
       if (!serverUrl) return alert('Ingresa la URL del servidor maestro.');
       await window.studentAPI.connectServer({ serverUrl, hostname });
+    }
+
+    function triggerRadarReScan() {
+      const banner = document.getElementById('radar-status-banner');
+      const text = document.getElementById('radar-status-text');
+      banner.className = 'radar-status-bar';
+      text.innerText = '🟡 Buscando Maestro en la red (Radar activo)...';
+
+      if (window.studentAPI && window.studentAPI.restartRadarSearch) {
+        window.studentAPI.restartRadarSearch();
+      }
     }
 
     // Toggle Mano Levantada
@@ -394,7 +396,7 @@
         isMaestroLogged = true;
         closeLoginModal();
 
-        // Iniciar servidor Maestro embebido si es necesario
+        // Iniciar servidor Maestro embebido
         await window.studentAPI.startMaestroServer();
 
         // Actualizar UI para Maestro
@@ -403,7 +405,6 @@
         document.getElementById('maestro-nav-bar').classList.add('active');
         document.getElementById('maestro-section').style.display = 'flex';
 
-        // Reconectar como Maestro
         connectToServer();
       } else {
         document.getElementById('login-error').style.display = 'block';
@@ -426,9 +427,8 @@
       document.getElementById(tabId).classList.add('active');
     }
 
-    // --- WEBRTC TRANSMISIÓN NATIVA EN TIEMPO REAL (PEER-TO-PEER) ---
+    // --- WEBRTC TRANSMISIÓN NATIVA EN TIEMPO REAL ---
     function setupStudentWebRTCListeners() {
-      // Cuando el estudiante recibe una oferta WebRTC del Maestro
       window.studentAPI.onWebRTCOfferReceived(async (data) => {
         const { senderSocketId, offer } = data;
         const sourceId = await window.studentAPI.getDesktopSourceId();
@@ -519,7 +519,6 @@
         }
       };
 
-      // Crear data channel para forzar inicialización ICE si es necesario
       peerConnection.createDataChannel('control');
 
       const offer = await peerConnection.createOffer();
@@ -618,33 +617,7 @@
       }
     }
 
-    // --- RADAR LAN PEERS ---
-    function renderRadarPeers(peers) {
-      const tbody = document.getElementById('radar-peers-tbody');
-      if (!peers || peers.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#94a3b8; padding:2rem;">Buscando dispositivos en la red LAN...</td></tr>';
-        return;
-      }
-
-      tbody.innerHTML = peers.map(p => `
-        <tr>
-          <td><strong>💻 ${escapeHtml(p.hostname)}</strong></td>
-          <td>${p.ip}</td>
-          <td>${p.port}</td>
-          <td><span class="badge-60fps">Online (LAN)</span></td>
-          <td>
-            <button class="btn btn-primary btn-sm" onclick="connectRadarPeer('http://${p.ip}:${p.port}')">Conectar</button>
-          </td>
-        </tr>
-      `).join('');
-    }
-
-    function connectRadarPeer(url) {
-      document.getElementById('server-url').value = url;
-      connectToServer();
-    }
-
-    // Escuchadores de Eventos
+    // Escuchadores de Eventos de Estado
     window.studentAPI.onConnectionStatus((data) => {
       const badge = document.getElementById('conn-badge');
       if (data.connected) {
@@ -652,7 +625,7 @@
         badge.className = 'status-badge connected';
       } else {
         badge.innerText = 'Desconectado';
-        badge.className = 'status-badge disconnected';
+        badge.className = 'status-badge searching';
       }
     });
 
@@ -685,44 +658,6 @@
       chatBox.appendChild(msgDiv);
       chatBox.scrollTop = chatBox.scrollHeight;
     });
-
-    // Actualizar lista de estudiantes para el Maestro
-    function updateMaestroGrid(list) {
-      studentsList = list;
-      const grid = document.getElementById('maestro-students-grid');
-      const select = document.getElementById('fs-student-select');
-
-      if (list.length === 0) {
-        grid.innerHTML = '<div style="color:#94a3b8; text-align:center; padding:2rem; grid-column:1/-1;">Esperando equipos...</div>';
-        select.innerHTML = '<option value="">Selecciona un estudiante...</option>';
-        return;
-      }
-
-      // Actualizar Select de FS
-      select.innerHTML = '<option value="">Selecciona un estudiante...</option>' + list.map(s => `
-        <option value="${s.id}">${escapeHtml(s.hostname)} (${s.ip})</option>
-      `).join('');
-
-      grid.innerHTML = list.map(s => `
-        <div class="student-card ${s.handRaised ? 'hand-active' : ''}">
-          <div style="display:flex; justify-content:space-between; font-weight:700;">
-            <span>💻 ${escapeHtml(s.hostname)}</span>
-            ${s.handRaised ? '✋' : ''}
-          </div>
-          <div style="font-size:0.75rem; color:#64748b;">IP: ${s.ip}</div>
-          <div style="display:flex; gap:0.3rem; margin-top:0.3rem;">
-            <button class="btn btn-primary btn-sm" onclick="startWebRTCStream('${s.id}')">⚡ Ver WebRTC 60 FPS</button>
-            <button class="btn btn-secondary btn-sm" onclick="openFSForStudent('${s.id}')">📁 Archivos</button>
-          </div>
-        </div>
-      `).join('');
-    }
-
-    function openFSForStudent(id) {
-      switchMaestroTab('tab-fs');
-      document.getElementById('fs-student-select').value = id;
-      loadStudentDirectory('HOME');
-    }
 
     function escapeHtml(str) {
       if (!str) return '';

@@ -8,10 +8,10 @@ contextBridge.exposeInMainWorld('studentAPI', {
   sendChat: (message) => ipcRenderer.invoke('send-chat', message),
   startMaestroServer: () => ipcRenderer.invoke('start-maestro-server'),
 
-  // Radar LAN
-  getRadarPeers: () => ipcRenderer.invoke('get-radar-peers'),
-  onRadarDiscoveredPeers: (callback) => {
-    ipcRenderer.on('radar-discovered-peers', (event, peers) => callback(peers));
+  // Radar UDP y Auto-Descubrimiento de Maestro
+  restartRadarSearch: () => ipcRenderer.invoke('restart-radar-search'),
+  onMaestroAutoDiscovered: (callback) => {
+    ipcRenderer.on('maestro-auto-discovered', (event, data) => callback(data));
   },
 
   // WebRTC Native Stream
