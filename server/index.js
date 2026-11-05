@@ -45,14 +45,14 @@ app.get('/api/identity', (req, res) => {
   });
 });
 
-// Mapas de datos en memoria
-const studentsMap = new Map();
+// 1. REGISTRO GLOBAL DE ESTUDIANTES CONECTADOS (connectedStudents Map)
+const connectedStudents = new Map();
 const unlinkedRadarDevices = new Map();
 
 function broadcastStudentsList() {
-  const list = Array.from(studentsMap.values());
-  io.emit('students-list', list);
+  const list = Array.from(connectedStudents.values());
   io.emit('update-student-list', list);
+  io.emit('students-list', list);
 }
 
 function broadcastUnlinkedRadarDevices() {
@@ -61,6 +61,14 @@ function broadcastUnlinkedRadarDevices() {
 }
 
 function registerOrUpdateStudent(socket, data = {}) {
+  const role = data.role || 'student';
+  
+  // Si role === 'teacher', NO guardarlo en connectedStudents
+  if (role === 'teacher') {
+    console.log(`[Socket ${socket.id}] Conectado como Rol 'teacher'. No se guarda en connectedStudents.`);
+    return;
+  }
+
   let rawIp = socket.handshake.address || '';
   let clientIp = rawIp.replace(/^.*:/, '').replace(/^::ffff:/, '').trim();
 
@@ -68,12 +76,14 @@ function registerOrUpdateStudent(socket, data = {}) {
     clientIp = data.ip;
   }
 
-  const existing = studentsMap.get(socket.id) || {};
+  const existing = connectedStudents.get(socket.id) || {};
 
-  const studentInfo = {
+  const studentData = {
+    socketId: socket.id,
     id: socket.id,
     hostname: data.hostname || data.name || existing.hostname || `Estudiante-${socket.id.slice(0, 4)}`,
     ip: clientIp || '127.0.0.1',
+    role: 'student',
     status: 'online',
     handRaised: typeof data.handRaised === 'boolean' ? data.handRaised : (existing.handRaised || false),
     handRaisedAt: data.handRaisedAt || existing.handRaisedAt || null,
@@ -83,17 +93,18 @@ function registerOrUpdateStudent(socket, data = {}) {
     connectedAt: existing.connectedAt || new Date().toISOString()
   };
 
-  studentsMap.set(socket.id, studentInfo);
+  // Guardar en el Map global
+  connectedStudents.set(socket.id, studentData);
 
   for (const [key, dev] of unlinkedRadarDevices.entries()) {
-    if (dev.ip === clientIp || dev.hostname === studentInfo.hostname) {
+    if (dev.ip === clientIp || dev.hostname === studentData.hostname) {
       unlinkedRadarDevices.delete(key);
     }
   }
 
-  console.log(`[Estudiante Registrado] ${studentInfo.hostname} (${studentInfo.ip}) - Socket ID: ${socket.id}`);
+  console.log(`[Estudiante Registrado] ${studentData.hostname} (IP: ${studentData.ip}) - Socket ID: ${socket.id}`);
   
-  // Re-renderizado inmediato de la lista/grilla del Maestro
+  // Broadcast a la UI del Maestro con el listado actualizado
   broadcastStudentsList();
   broadcastUnlinkedRadarDevices();
 }
@@ -103,24 +114,33 @@ io.on('connection', (socket) => {
   const clientIp = rawIp.replace(/^.*:/, '').replace(/^::ffff:/, '').trim() || '127.0.0.1';
   console.log(`[+] Conexión socket recibida: ${socket.id} (IP: ${clientIp})`);
 
-  socket.emit('students-list', Array.from(studentsMap.values()));
-  socket.emit('update-student-list', Array.from(studentsMap.values()));
+  // Enviar lista actual al conectar
+  const currentList = Array.from(connectedStudents.values());
+  socket.emit('update-student-list', currentList);
+  socket.emit('students-list', currentList);
   socket.emit('update-radar-unlinked', Array.from(unlinkedRadarDevices.values()));
-  io.emit('sync-request');
 
+  // Manejo de eventos de registro
   socket.on('register-student', (data) => registerOrUpdateStudent(socket, data));
   socket.on('student-join', (data) => registerOrUpdateStudent(socket, data));
 
-  socket.on('maestro-joined', () => {
-    console.log('[Server] Maestro unido. Enviando estado actual...');
-    const currentList = Array.from(studentsMap.values());
-    socket.emit('students-list', currentList);
-    socket.emit('update-student-list', currentList);
-    socket.emit('update-radar-unlinked', Array.from(unlinkedRadarDevices.values()));
-    io.emit('sync-request');
+  // Manejo de sincronización manual de la lista
+  socket.on('request-student-list', () => {
+    console.log(`[Sync Request] Solicitud manual 'request-student-list' recibida de ${socket.id}`);
+    const list = Array.from(connectedStudents.values());
+    socket.emit('update-student-list', list);
+    socket.emit('students-list', list);
   });
 
-  // WebRTC Signal Relays
+  socket.on('maestro-joined', () => {
+    console.log('[Server] Maestro unido a la sesión.');
+    const list = Array.from(connectedStudents.values());
+    socket.emit('update-student-list', list);
+    socket.emit('students-list', list);
+    socket.emit('update-radar-unlinked', Array.from(unlinkedRadarDevices.values()));
+  });
+
+  // WebRTC Signals
   socket.on('webrtc-offer', (payload) => {
     if (payload && payload.targetSocketId) {
       io.to(payload.targetSocketId).emit('webrtc-offer', {
@@ -148,9 +168,9 @@ io.on('connection', (socket) => {
     }
   });
 
-  // FS Engine Relays
+  // FS Engine
   socket.on('fs-read-directory', (payload) => {
-    if (payload && payload.targetSocketId && studentsMap.has(payload.targetSocketId)) {
+    if (payload && payload.targetSocketId && connectedStudents.has(payload.targetSocketId)) {
       io.to(payload.targetSocketId).emit('fs-read-directory', {
         requesterSocketId: socket.id,
         dirPath: payload.dirPath
@@ -165,7 +185,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('fs-create-directory', (payload) => {
-    if (payload && payload.targetSocketId && studentsMap.has(payload.targetSocketId)) {
+    if (payload && payload.targetSocketId && connectedStudents.has(payload.targetSocketId)) {
       io.to(payload.targetSocketId).emit('fs-create-directory', {
         requesterSocketId: socket.id,
         parentPath: payload.parentPath,
@@ -175,7 +195,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('fs-upload-file', (payload) => {
-    if (payload && payload.targetSocketId && studentsMap.has(payload.targetSocketId)) {
+    if (payload && payload.targetSocketId && connectedStudents.has(payload.targetSocketId)) {
       io.to(payload.targetSocketId).emit('fs-upload-file', {
         requesterSocketId: socket.id,
         targetPath: payload.targetPath,
@@ -193,7 +213,7 @@ io.on('connection', (socket) => {
 
   // Hands & Chat
   socket.on('toggle-hand', () => {
-    const student = studentsMap.get(socket.id);
+    const student = connectedStudents.get(socket.id);
     if (student) {
       student.handRaised = !student.handRaised;
       student.handRaisedAt = student.handRaised ? new Date().toLocaleTimeString() : null;
@@ -202,11 +222,11 @@ io.on('connection', (socket) => {
   });
 
   socket.on('maestro-lower-hand', (targetSocketId = null) => {
-    if (targetSocketId && studentsMap.has(targetSocketId)) {
-      const s = studentsMap.get(targetSocketId);
+    if (targetSocketId && connectedStudents.has(targetSocketId)) {
+      const s = connectedStudents.get(targetSocketId);
       if (s) { s.handRaised = false; s.handRaisedAt = null; }
     } else {
-      for (const s of studentsMap.values()) {
+      for (const s of connectedStudents.values()) {
         s.handRaised = false;
         s.handRaisedAt = null;
       }
@@ -215,7 +235,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('chat-message', (data) => {
-    const student = studentsMap.get(socket.id);
+    const student = connectedStudents.get(socket.id);
     const messagePayload = {
       sender: student ? student.hostname : (data.sender || 'Maestro'),
       role: student ? 'student' : (data.role || 'maestro'),
@@ -252,29 +272,29 @@ io.on('connection', (socket) => {
     const uniqueDomains = Array.from(new Set(fullDomains));
 
     if (uniqueDomains.length === 0) {
-      if (targetSocketId && studentsMap.has(targetSocketId)) {
+      if (targetSocketId && connectedStudents.has(targetSocketId)) {
         io.to(targetSocketId).emit('unblock-dns');
-        const s = studentsMap.get(targetSocketId);
+        const s = connectedStudents.get(targetSocketId);
         if (s) s.blockedDNS = false;
       } else {
         io.emit('unblock-dns');
-        for (const s of studentsMap.values()) s.blockedDNS = false;
+        for (const s of connectedStudents.values()) s.blockedDNS = false;
       }
     } else {
-      if (targetSocketId && studentsMap.has(targetSocketId)) {
+      if (targetSocketId && connectedStudents.has(targetSocketId)) {
         io.to(targetSocketId).emit('block-dns', { domains: uniqueDomains });
-        const s = studentsMap.get(targetSocketId);
+        const s = connectedStudents.get(targetSocketId);
         if (s) s.blockedDNS = true;
       } else {
         io.emit('block-dns', { domains: uniqueDomains });
-        for (const s of studentsMap.values()) s.blockedDNS = true;
+        for (const s of connectedStudents.values()) s.blockedDNS = true;
       }
     }
     broadcastStudentsList();
   });
 
   socket.on('screen-frame', (frameData) => {
-    const student = studentsMap.get(socket.id);
+    const student = connectedStudents.get(socket.id);
     if (student) {
       student.isScreenSharing = true;
       student.lastScreenFrame = frameData;
@@ -286,19 +306,22 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Manejo de desconexión del estudiante
+  // Manejo del evento disconnect
   socket.on('disconnect', () => {
-    if (studentsMap.has(socket.id)) {
-      const student = studentsMap.get(socket.id);
+    if (connectedStudents.has(socket.id)) {
+      const student = connectedStudents.get(socket.id);
       console.log(`[-] Estudiante desconectado: ${student.hostname}`);
-      studentsMap.delete(socket.id);
+      
+      // Eliminar del Map
+      connectedStudents.delete(socket.id);
 
-      // Re-emitir inmediatamente la lista actualizada para re-renderizar la UI del Maestro
+      // Emitir nuevamente el listado actualizado
       broadcastStudentsList();
     }
   });
 });
 
+// Emisión Radar UDP del Maestro
 function startMaestroUdpBroadcast(port = 3000, instanceId = null) {
   if (instanceId) maestroInstanceId = instanceId;
 
@@ -315,7 +338,7 @@ function startMaestroUdpBroadcast(port = 3000, instanceId = null) {
         if (data && data.type === 'AULA_RADAR_ANNOUNCE') {
           const devIp = rinfo.address;
           let isConnected = false;
-          for (const s of studentsMap.values()) {
+          for (const s of connectedStudents.values()) {
             if (s.ip === devIp || s.hostname === data.hostname) {
               isConnected = true;
               break;
@@ -346,9 +369,9 @@ function startMaestroUdpBroadcast(port = 3000, instanceId = null) {
       const payload = JSON.stringify({
         service: 'AULA_CONTROL_MASTER',
         port: port,
-        name: os.hostname(),
         instanceId: maestroInstanceId,
         hostIp: getLocalIPv4Address(),
+        name: os.hostname(),
         timestamp: Date.now()
       });
       const msg = Buffer.from(payload);
@@ -390,7 +413,7 @@ function startEmbeddedServer(port = PORT, instanceId = null) {
 
 function stopEmbeddedServer() {
   stopMaestroUdpBroadcast();
-  studentsMap.clear();
+  connectedStudents.clear();
   unlinkedRadarDevices.clear();
 
   if (server && server.listening) {

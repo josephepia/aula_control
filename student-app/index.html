@@ -15,7 +15,7 @@
     .status-badge { font-size: 0.75rem; padding: 0.25rem 0.65rem; border-radius: 9999px; font-weight: 700; background: #64748b; color: white; }
     .status-badge.connected { background: #10b981; }
     .status-badge.searching { background: #f59e0b; }
-    .status-badge.disconnected { background: #ef4444; }
+    .status-badge.online { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
 
     .maestro-nav-bar { background: #1e293b; padding: 0.5rem 1.25rem; display: none; gap: 0.5rem; border-bottom: 1px solid #334155; }
     .maestro-nav-bar.active { display: flex; }
@@ -60,9 +60,11 @@
     .maestro-panel { display: none; flex-direction: column; gap: 1rem; }
     .maestro-panel.active { display: flex; }
 
-    .students-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
-    .student-card { background: white; border: 1px solid #cbd5e1; border-radius: 0.5rem; padding: 0.85rem; display: flex; flex-direction: column; gap: 0.5rem; }
-    .student-card.hand-active { border-color: #f59e0b; background: #fffbeb; }
+    .students-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem; }
+    .student-card { background: white; border: 1px solid #cbd5e1; border-radius: 0.5rem; padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+    .student-card h3 { font-size: 0.95rem; font-weight: 700; margin: 0; }
+
+    #empty-state { color: #94a3b8; font-size: 0.9rem; text-align: center; padding: 3rem; width: 100%; }
 
     .fs-explorer { display: flex; flex-direction: column; gap: 0.75rem; }
     .fs-toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; background: #f8fafc; padding: 0.6rem; border-radius: 0.375rem; border: 1px solid #e2e8f0; }
@@ -95,7 +97,6 @@
     </div>
   </header>
 
-  <!-- Nav Tabs para el Maestro -->
   <div class="maestro-nav-bar" id="maestro-nav-bar">
     <button class="nav-tab-btn active" onclick="switchMaestroTab('tab-dashboard')">🖥️ Panel Maestro</button>
     <button class="nav-tab-btn" onclick="switchMaestroTab('tab-fs')">📁 Explorador de Archivos Remoto</button>
@@ -166,12 +167,17 @@
         <div class="card">
           <div class="card-header">
             <span>🖥️ Equipos Conectados en el Aula</span>
+            <!-- 3. Botón de Refresco de Lista Manual -->
+            <button class="btn btn-secondary btn-sm" onclick="refreshStudentList()">🔄 Refrescar Lista</button>
           </div>
-          <div class="students-grid" id="maestro-students-grid">
-            <div style="color: #94a3b8; font-size: 0.9rem; grid-column: 1 / -1; text-align: center; padding: 2rem;">
-              Esperando equipos conectados...
-            </div>
+
+          <!-- Estado Vacío -->
+          <div id="empty-state">
+            Esperando equipos conectados...
           </div>
+
+          <!-- Contenedor Grilla de Equipos -->
+          <div id="students-grid" class="students-grid"></div>
         </div>
       </div>
 
@@ -268,7 +274,7 @@
       }
 
       window.studentAPI.onMaestroAutoDiscovered((data) => {
-        if (isMaestroLogged) return; // Ignorar en modo maestro
+        if (isMaestroLogged) return;
 
         console.log('[Radar Auto-Discovered]:', data);
         const serverInput = document.getElementById('server-url');
@@ -291,7 +297,7 @@
       window.studentAPI.onFSOperationResult((data) => handleFSOperationResult(data));
 
       window.studentAPI.onUpdateStudentList((list) => {
-        updateMaestroGrid(list);
+        handleStudentListUpdate(list);
       });
 
       connectToServer();
@@ -376,7 +382,6 @@
         isMaestroLogged = true;
         closeLoginModal();
 
-        // Iniciar Servidor Embebido y Aislamiento de Roles
         await window.studentAPI.startMaestroServer();
 
         document.getElementById('admin-login-btn').style.display = 'none';
@@ -396,7 +401,6 @@
     async function logoutMaestro() {
       isMaestroLogged = false;
 
-      // Detener Servidor y Broadcast Maestro
       if (window.studentAPI && window.studentAPI.stopMaestroServer) {
         await window.studentAPI.stopMaestroServer();
       }
@@ -420,6 +424,58 @@
 
       event.target.classList.add('active');
       document.getElementById(tabId).classList.add('active');
+    }
+
+    function refreshStudentList() {
+      if (window.studentAPI && window.studentAPI.sendChat) {
+        // Enviar pedido manual de sync si aplica
+      }
+    }
+
+    // 3. RENDERIZADO REACTIVO Y BÚSQUEDA EXPRESA
+    function handleStudentListUpdate(students) {
+      studentsList = students || [];
+      const gridContainer = document.getElementById('students-grid');
+      const emptyState = document.getElementById('empty-state');
+      const select = document.getElementById('fs-student-select');
+      
+      // Filtrar para evitar renderizar al maestro o datos nulos
+      const validStudents = (students || []).filter(s => s && s.role !== 'teacher');
+
+      if (select) {
+        select.innerHTML = '<option value="">Selecciona un estudiante...</option>' + validStudents.map(s => `
+          <option value="${s.socketId || s.id}">${escapeHtml(s.hostname)} (${s.ip})</option>
+        `).join('');
+      }
+
+      if (validStudents.length === 0) {
+        if (gridContainer) gridContainer.innerHTML = '';
+        if (emptyState) emptyState.style.display = 'block';
+        return;
+      }
+
+      if (emptyState) emptyState.style.display = 'none';
+      if (gridContainer) {
+        gridContainer.innerHTML = validStudents.map(student => `
+          <div class="student-card" id="student-${student.socketId || student.id}">
+            <div class="card-header" style="background:none; border:none; padding:0; font-weight:700;">
+              <h3>💻 ${escapeHtml(student.hostname)}</h3>
+              <span class="status-badge online">En línea</span>
+            </div>
+            <p class="ip-text" style="font-size:0.8rem; color:#64748b; margin-top:0.2rem;">IP: ${student.ip}</p>
+            <div class="card-actions" style="display:flex; gap:0.4rem; margin-top:0.5rem;">
+              <button class="btn btn-primary btn-sm" onclick="startWebRTCStream('${student.socketId || student.id}')">Ver Pantalla</button>
+              <button class="btn btn-secondary btn-sm" onclick="openFSForStudent('${student.socketId || student.id}')">Archivos</button>
+            </div>
+          </div>
+        `).join('');
+      }
+    }
+
+    function openFSForStudent(id) {
+      switchMaestroTab('tab-fs');
+      document.getElementById('fs-student-select').value = id;
+      loadStudentDirectory('HOME');
     }
 
     // WebRTC
@@ -490,7 +546,7 @@
     }
 
     async function startWebRTCStream(studentId) {
-      const student = studentsList.find(s => s.id === studentId);
+      const student = studentsList.find(s => (s.socketId || s.id) === studentId);
       if (!student) return;
 
       activeWebRTCStudentId = studentId;
@@ -664,43 +720,6 @@
       chatBox.appendChild(msgDiv);
       chatBox.scrollTop = chatBox.scrollHeight;
     });
-
-    function updateMaestroGrid(list) {
-      studentsList = list;
-      const grid = document.getElementById('maestro-students-grid');
-      const select = document.getElementById('fs-student-select');
-
-      if (list.length === 0) {
-        grid.innerHTML = '<div style="color:#94a3b8; text-align:center; padding:2rem; grid-column:1/-1;">Esperando equipos conectados...</div>';
-        select.innerHTML = '<option value="">Selecciona un estudiante...</option>';
-        return;
-      }
-
-      select.innerHTML = '<option value="">Selecciona un estudiante...</option>' + list.map(s => `
-        <option value="${s.id}">${escapeHtml(s.hostname)} (${s.ip})</option>
-      `).join('');
-
-      grid.innerHTML = list.map(s => `
-        <div class="student-card ${s.handRaised ? 'hand-active' : ''}">
-          <div style="display:flex; justify-content:space-between; font-weight:700;">
-            <span>💻 ${escapeHtml(s.hostname)}</span>
-            ${s.handRaised ? '✋' : ''}
-          </div>
-          <div style="font-size:0.75rem; color:#64748b;">IP: ${s.ip}</div>
-          <div style="font-size:0.7rem; color:#10b981; font-weight:700;">🟢 Online</div>
-          <div style="display:flex; gap:0.3rem; margin-top:0.3rem;">
-            <button class="btn btn-primary btn-sm" onclick="startWebRTCStream('${s.id}')">⚡ Ver WebRTC 60 FPS</button>
-            <button class="btn btn-secondary btn-sm" onclick="openFSForStudent('${s.id}')">📁 Archivos</button>
-          </div>
-        </div>
-      `).join('');
-    }
-
-    function openFSForStudent(id) {
-      switchMaestroTab('tab-fs');
-      document.getElementById('fs-student-select').value = id;
-      loadStudentDirectory('HOME');
-    }
 
     function escapeHtml(str) {
       if (!str) return '';

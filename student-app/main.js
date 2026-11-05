@@ -7,8 +7,8 @@ const http = require('http');
 const { exec } = require('child_process');
 const io = require('socket.io-client');
 
-// Identificador único de instancia
-const appInstanceId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+// 2. ID único de instancia por ejecución
+const appInstanceId = Math.random().toString(36).substring(7);
 
 let mainWindow = null;
 let socket = null;
@@ -16,7 +16,7 @@ let screenInterval = null;
 let currentStudentName = '';
 let isCapturing = false;
 
-// VARIABLES DE ESTADO Y ROL GLOBAL
+// Variables de estado y aislamiento de rol
 let currentRole = 'student'; // 'student' | 'maestro'
 let isMaestroMode = false;
 
@@ -103,7 +103,7 @@ function setupForceConnectListener() {
   }
 }
 
-// RECEPCIÓN PASIVA DE RADAR UDP MAESTRO
+// 2. RECEPCIÓN DE RADAR UDP (UDP ECHO FILTER)
 function setupRadarListener() {
   try {
     if (udpSocket) {
@@ -120,7 +120,7 @@ function setupRadarListener() {
       try {
         const data = JSON.parse(msg.toString());
         if (data && data.service === 'AULA_CONTROL_MASTER') {
-          // IGNORAR SI ES DE LA PROPIA INSTANCIA O SI LA APP ESTÁ EN MODO MAESTRO
+          // IGNORAR EL PAQUETE si payload.instanceId === appInstanceId o si la app está en Modo Maestro
           if (data.instanceId === appInstanceId || currentRole === 'maestro' || isMaestroMode) {
             return;
           }
@@ -138,7 +138,7 @@ function setupRadarListener() {
 
     udpSocket.bind(RADAR_PORT, () => {
       udpSocket.setBroadcast(true);
-      console.log(`[Radar UDP Student Pasivo] Escuchando en puerto UDP ${RADAR_PORT} (Instance ID: ${appInstanceId})`);
+      console.log(`[Radar UDP Student] Escuchando en puerto UDP ${RADAR_PORT} (appInstanceId: ${appInstanceId})`);
     });
 
   } catch (err) {
@@ -190,7 +190,6 @@ function runSubnetScanFallback() {
 function checkMaestroIdentityHttp(targetIp, port = 3000) {
   if (maestroDiscovered || currentRole === 'maestro' || isMaestroMode) return;
 
-  // Evitar auto-escaneo a uno mismo
   if (isSelfOrLocalAddress(targetIp) && (currentRole === 'maestro' || isMaestroMode)) {
     return;
   }
@@ -366,17 +365,17 @@ function stopScreenSharing() {
   if (mainWindow) mainWindow.webContents.send('screen-sharing-status', false);
 }
 
-// EVITAR QUE LA MÁQUINA SE AUTO-REGISTRE COMO ESTUDIANTE
+// REGISTRO DE ESTUDIANTE (EVITAR SI LA APP ES MAESTRO O SE CONECTA A UNO MISMO)
 function sendStudentRegistration() {
   if (currentRole === 'maestro' || isMaestroMode) {
-    console.log('[Auto-Reg Prevented] La app se encuentra en Modo Maestro. Registro cancelado.');
+    console.log('[Auto-Reg Prevented] Modo Maestro activo. NUNCA emitir register-student.');
     return;
   }
 
   if (socket && socket.connected) {
     const targetUrl = socket.io.uri || '';
-    if (isSelfOrLocalAddress(targetUrl) && (currentRole === 'maestro' || isMaestroMode)) {
-      console.log('[Auto-Reg Prevented] No se permite auto-registrar la máquina local como estudiante.');
+    if (isSelfOrLocalAddress(targetUrl)) {
+      console.log('[Auto-Reg Prevented] No se permite conectar como cliente Socket.io al servidor propio local.');
       return;
     }
 
@@ -384,6 +383,7 @@ function sendStudentRegistration() {
     const payload = {
       hostname: currentStudentName || os.hostname() || 'Estudiante-PC',
       ip: localIp,
+      role: 'student',
       status: 'online'
     };
     socket.emit('register-student', payload);
@@ -393,12 +393,12 @@ function sendStudentRegistration() {
 
 function connectToMaestroSocket(serverUrl) {
   if (currentRole === 'maestro' || isMaestroMode) {
-    console.log('[Role Protection] En Modo Maestro no se abre socket cliente de estudiante.');
+    console.log('[Role Protection] En Modo Maestro NUNCA intentar conectarse como cliente Socket.io.');
     return;
   }
 
   if (isSelfOrLocalAddress(serverUrl) && (currentRole === 'maestro' || isMaestroMode)) {
-    console.log('[Role Protection] Bloqueado intento de auto-conexión a la propia máquina.');
+    console.log('[Role Protection] Auto-conexión bloqueada hacia la propia máquina.');
     return;
   }
 
@@ -453,7 +453,7 @@ function connectToMaestroSocket(serverUrl) {
     if (mainWindow) mainWindow.webContents.send('dns-status', { blocked: false });
   });
 
-  // WebRTC Signal Relays
+  // WebRTC Signals
   socket.on('webrtc-offer', (data) => {
     if (mainWindow) mainWindow.webContents.send('webrtc-offer-received', data);
   });
@@ -615,11 +615,9 @@ app.on('window-all-closed', () => {
 
 // IPC Handlers
 ipcMain.handle('start-maestro-server', async () => {
-  // CAMBIAR ROL GLOBAL A MAESTRO
   currentRole = 'maestro';
   isMaestroMode = true;
 
-  // Desconectar cliente Socket.io del estudiante de forma segura
   if (socket) {
     socket.disconnect();
     socket = null;
@@ -644,8 +642,6 @@ ipcMain.handle('start-maestro-server', async () => {
 });
 
 ipcMain.handle('stop-maestro-server', async () => {
-  // LIMPIEZA TOTAL DE INSTANCIA AL CERRAR SESIÓN DE MAESTRO
-  // 1. Detener emisión del Radar UDP y servidor HTTP/Socket.io local
   try {
     const serverModule = require('../server/index.js');
     if (serverModule.stopEmbeddedServer) {
@@ -653,19 +649,17 @@ ipcMain.handle('stop-maestro-server', async () => {
     }
   } catch (e) {}
 
-  // 2. Cambiar variable de estado global de la app a currentRole = 'student'
   currentRole = 'student';
   isMaestroMode = false;
   maestroDiscovered = false;
   embeddedServerStarted = false;
 
-  // 3. Iniciar nuevamente la escucha del Radar UDP en modo PASIVO (solo receptor)
   setupRadarListener();
 
   if (fallbackScanTimer) clearTimeout(fallbackScanTimer);
   runSubnetScanFallback();
 
-  console.log('[Logout Maestro] Limpieza total completada. currentRole reset a "student". Radar pasivo activo.');
+  console.log('[Logout Maestro] Limpieza total completada.');
   return { success: true };
 });
 
